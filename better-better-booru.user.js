@@ -1869,7 +1869,7 @@ function bbbScript() { // Wrapper for injecting the script into the document.
 	/* Functions for the settings panel */
 	function injectSettings() {
 		var menu = document.getElementById("top");
-		menu = (menu ? menu.getElementsByTagName("menu")[0] : undefined);
+		menu = (menu ? menu.getElementsByTagName("div")[0] : undefined);
 
 		if (!menu)
 			return;
@@ -9110,7 +9110,7 @@ function bbbScript() { // Wrapper for injecting the script into the document.
 
 	function isLoggedIn() {
 		// Use Danbooru's meta tags to determine if a use is logged in.
-		if (getMeta("current-user-id") !== "")
+		if (getMeta("data-current-user-id") !== "")
 			return true;
 		else
 			return false;
@@ -9216,12 +9216,14 @@ function bbbScript() { // Wrapper for injecting the script into the document.
 			}, false);
 		}
 		else if (getCookie().bbb_acc_check) {
-			var userId = getMeta("current-user-id");
+			var userId = document.body.getAttribute('data-current-user-id');
 
 			if (userId !== "")
 				searchPages("account_check", userId);
 			else
 				createCookie("bbb_acc_check", 0, -1);
+            console.log('userId:', userId);
+            console.log('bbb_acc_check cookie:', getCookie().bbb_acc_check);
 		}
 	}
 
@@ -10439,7 +10441,6 @@ function bbbScript() { // Wrapper for injecting the script into the document.
 		if (allowAutocomplete)
 			bbbAutocomplete(searchInputs);
 	}
-
 } // End of bbbScript.
 
 function runBBBScript() {
@@ -10453,6 +10454,101 @@ function runBBBScript() {
 	else
 		bbbScript();
 }
+
+function initImageFix() {// Изменяем способ поиска элементов
+document.addEventListener('DOMContentLoaded', function() {
+    // Ищем все контейнеры с постами
+    let postContainers = document.querySelectorAll('.post-preview');
+
+    postContainers.forEach(function(container) {
+        // Проверяем, есть ли уже изменения в элементе
+        if (!container.classList.contains('bbb-modified')) {
+            try {
+                // Получаем необходимые данные из data-атрибутов
+                let fileUrl = container.dataset.fileUrl;
+                let largeFileUrl = container.dataset.largeFileUrl;
+                let previewFileUrl = container.dataset.previewFileUrl;
+
+                // Создаем новый picture element
+                let picture = document.createElement('picture');
+
+                // Добавляем источники изображений
+                let source1 = document.createElement('source');
+                source1.setAttribute('media', '(max-width: 660px)');
+                source1.setAttribute('srcset', largeFileUrl);
+                picture.appendChild(source1);
+
+                let source2 = document.createElement('source');
+                source2.setAttribute('media', '(min-width: 660px)');
+                source2.setAttribute('srcset', previewFileUrl);
+                picture.appendChild(source2);
+
+                // Добавляем основное изображение
+                let img = document.createElement('img');
+                img.setAttribute('src', previewFileUrl);
+                img.setAttribute('alt', container.dataset.tags);
+                picture.appendChild(img);
+
+                // Заменяем старый img на новый picture
+                container.querySelector('.post-preview-image').parentNode.replaceChild(picture, container.querySelector('.post-preview-image'));
+
+                // Помечаем элемент как модифицированный
+                container.classList.add('bbb-modified');
+            } catch (error) {
+                console.error('Ошибка при модификации элемента:', error);
+            }
+        }
+    });
+
+    // Добавляем наблюдатель за новыми элементами
+    new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            if (mutation.addedNodes) {
+                [...mutation.addedNodes].forEach(function(node) {
+                    if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('post-preview')) {
+                        // Применяем те же изменения к новым элементам
+                        modifyPostContainer(node);
+                    }
+                });
+            }
+        });
+    }).observe(document.body, { childList: true, subtree: true });
+});
+
+function modifyPostContainer(container) {
+    // Тот же код модификации, что и выше
+    if (!container.classList.contains('bbb-modified')) {
+        try {
+            let fileUrl = container.dataset.fileUrl;
+            let largeFileUrl = container.dataset.largeFileUrl;
+            let previewFileUrl = container.dataset.previewFileUrl;
+
+            let picture = document.createElement('picture');
+
+            let source1 = document.createElement('source');
+            source1.setAttribute('media', '(max-width: 660px)');
+            source1.setAttribute('srcset', largeFileUrl);
+            picture.appendChild(source1);
+
+            let source2 = document.createElement('source');
+            source2.setAttribute('media', '(min-width: 660px)');
+            source2.setAttribute('srcset', previewFileUrl);
+            picture.appendChild(source2);
+
+            let img = document.createElement('img');
+            img.setAttribute('src', previewFileUrl);
+            img.setAttribute('alt', container.dataset.tags);
+            picture.appendChild(img);
+
+            container.querySelector('.post-preview-image').parentNode.replaceChild(picture, container.querySelector('.post-preview-image'));
+
+            container.classList.add('bbb-modified');
+        } catch (error) {
+            console.error('Ошибка при модификации элемента:', error);
+        }
+    }
+}}
+initImageFix();
 
 function bbbInit() {
 	var bbbGMFunc; // If/else variable;
@@ -10519,3 +10615,46 @@ function bbbInit() {
 }
 
 bbbInit();
+
+function fixPostClasses() {
+    // Получаем все посты
+    const posts = document.querySelectorAll('.post-preview');
+
+    // Проходим по каждому посту
+    posts.forEach(function(post) {
+        // Удаляем нежелательный класс post_*id*
+        const currentClasses = post.classList;
+
+        // Находим и удаляем класс, начинающийся с "post_"
+        for (let i = 0; i < currentClasses.length; i++) {
+            if (/^post_\\d+$/.test(currentClasses[i])) {
+                post.classList.remove(currentClasses[i]);
+            }
+        }
+
+        // Добавляем необходимые классы
+        post.classList.add('post-preview-fit-compact');
+        post.classList.add('post-preview-180');
+        post.classList.add('blacklist-initialized');
+    });
+}
+
+// Вызываем функцию после полной загрузки DOM
+document.addEventListener('DOMContentLoaded', function() {
+    // Добавляем небольшую задержку для гарантии
+    setTimeout(() => {
+        fixPostClasses();
+    }, 500);
+});
+
+// Также можно добавить повторный вызов при изменении DOM
+const observer = new MutationObserver(() => {
+    setTimeout(() => {
+        fixPostClasses();
+    }, 500);
+});
+
+observer.observe(document.body, {
+    childList: true,
+    subtree: true
+});
