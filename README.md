@@ -65,16 +65,13 @@ Features
 ---
 Installation
 ------------
-1. Installing a userscript manager is strongly recommended and sometimes required. Suggestions:
+1. Install a userscript manager. Suggestions:
   * [Tampermonkey](http://tampermonkey.net/) (Chrome, Opera)
   * [Violentmonkey](https://addons.opera.com/extensions/details/violent-monkey/) (Opera)
   * [Greasemonkey](https://addons.mozilla.org/en-US/firefox/addon/greasemonkey/) (Firefox) (Note: Setting/data storage is not fully supported.)
-2. Open/install the script from a site or local computer file**. Please be sure you're using a trustworthy source. Recommendations:
-  * [Greasy Fork](https://greasyfork.org/scripts/3575-better-better-booru)
-  * [GitHub](https://github.com/pseudonymous/better-better-booru)
-3. A prompt about allowing the installation should display.
-4. Choose to allow/install after reviewing your options.
-5. The script should now be installed and ready for use on Danbooru.
-6. To access script features, use the "BBB Settings" link in the Danbooru navigation bar.
-
-** Note: If installing from a local file on your computer, your browser may require additional steps.
+2.1. Install from github directly:
+  * [Raw file](https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js)
+2.2.1 OR Download from [releases](https://github.com/hfaify/better-better-booru-2025/releases)
+2.2.2 Click on your manager extension
+2.2.3 Go to utils tab
+2.2.4 Import downloaded file
