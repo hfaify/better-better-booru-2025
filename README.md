@@ -69,9 +69,9 @@ Installation
   * [Tampermonkey](http://tampermonkey.net/) (Chrome, Opera)
   * [Violentmonkey](https://addons.opera.com/extensions/details/violent-monkey/) (Opera)
   * [Greasemonkey](https://addons.mozilla.org/en-US/firefox/addon/greasemonkey/) (Firefox) (Note: Setting/data storage is not fully supported.)
-2.1. Install from github directly:
+2. Install from github directly:
   * [Raw file](https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js)
-2.2.1 OR Download from [releases](https://github.com/hfaify/better-better-booru-2025/releases)
-2.2.2 Click on your manager extension
-2.2.3 Go to utils tab
-2.2.4 Import downloaded file
+3. OR Download from [releases](https://github.com/hfaify/better-better-booru-2025/releases)
+  * Click on your manager extension
+  * Go to utils tab
+  * Import downloaded file
