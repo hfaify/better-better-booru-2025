@@ -1,17 +1,21 @@
 // ==UserScript==
 // @name           better_better_booru
 // @namespace      https://greasyfork.org/scripts/3575-better-better-booru
-// @author         otani, modified by Jawertae, A Pseudonymous Coder & Moebius Strip.
+// @author         otani, modified by Jawertae, fixed by Hfaify.
 // @description    Several changes to make Danbooru much better.
 // @version        8.2.3
-// @updateURL      https://greasyfork.org/scripts/3575-better-better-booru/code/better_better_booru.meta.js
-// @downloadURL    https://greasyfork.org/scripts/3575-better-better-booru/code/better_better_booru.user.js
+// @updateURL      https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
+// @downloadURL    https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @match          *://*.donmai.us/*
+// @connect        https://isshiki.donmai.us
 // @run-at         document-end
+// @grant          GM_xmlhttpRequest
+// @grant          GM_addStyle
 // @grant          GM_setValue
 // @grant          GM_getValue
 // @grant          GM_deleteValue
 // @grant          GM_listValues
+// @grant          unsafeWindow
 // @icon           data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAAAAABWESUoAAAA9klEQVQ4y2NgGBgQu/Dau1/Pt/rhVPAfCkpwKXhUZ8Al2vT//yu89vDjV8AkP/P//zY0K//+eHVmoi5YyB7I/VDGiKYADP60wRT8P6aKTcH//0lgQcHS//+PYFdwFu7Ib8gKGBgYOQ22glhfGO7mqbEpzv///xyqAiAQAbGewIz8aoehQArEWsyQsu7O549XJiowoCpg4rM9CGS8V8UZ9GBwy5wBr4K/teL4Ffz//8mHgIL/v82wKgA6kkXE+zKIuRaHAhDQATFf4lHABmL+xKPAFhKUOBQwSyU+AzFXEvDFf3sCCnrxh8O3Ujwh+fXZvjoZ+udTAERqR5IgKEBRAAAAAElFTkSuQmCC
 // ==/UserScript==
 
@@ -10658,3 +10662,4 @@ observer.observe(document.body, {
     childList: true,
     subtree: true
 });
+
