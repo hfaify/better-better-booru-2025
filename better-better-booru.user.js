@@ -221,7 +221,7 @@ function bbbScript() { // Wrapper for injecting the script into the document.
 
 	document.bbbInfo = function(name, value) {
 		// Document specific bbbInfo that goes along with the element prototype method.
-		var imgContainer = document.getElementById("image-container");
+		var imgContainer = document.getElementsByClassName("image-container")[0];
 
 		if (typeof(value) !== "undefined" && imgContainer)
 			imgContainer.setAttribute("data-" + name, value);
@@ -847,7 +847,7 @@ function bbbScript() { // Wrapper for injecting the script into the document.
 	function parsePost() {
 		// Take a post's info and alter its page.
 		var postInfo = bbb.post.info = document.bbbInfo();
-		var imgContainer = document.getElementById("image-container");
+		var imgContainer = document.getElementsByClassName("image-container")[0];
 
 		if (!imgContainer || !postInfo) {
 			bbbNotice("Post content could not be located.", -1);
@@ -10662,4 +10662,5 @@ observer.observe(document.body, {
     childList: true,
     subtree: true
 });
+
 
