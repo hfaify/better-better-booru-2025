@@ -10459,101 +10459,6 @@ function runBBBScript() {
 		bbbScript();
 }
 
-function initImageFix() {// Изменяем способ поиска элементов
-document.addEventListener('DOMContentLoaded', function() {
-    // Ищем все контейнеры с постами
-    let postContainers = document.querySelectorAll('.post-preview');
-
-    postContainers.forEach(function(container) {
-        // Проверяем, есть ли уже изменения в элементе
-        if (!container.classList.contains('bbb-modified')) {
-            try {
-                // Получаем необходимые данные из data-атрибутов
-                let fileUrl = container.dataset.fileUrl;
-                let largeFileUrl = container.dataset.largeFileUrl;
-                let previewFileUrl = container.dataset.previewFileUrl;
-
-                // Создаем новый picture element
-                let picture = document.createElement('picture');
-
-                // Добавляем источники изображений
-                let source1 = document.createElement('source');
-                source1.setAttribute('media', '(max-width: 660px)');
-                source1.setAttribute('srcset', largeFileUrl);
-                picture.appendChild(source1);
-
-                let source2 = document.createElement('source');
-                source2.setAttribute('media', '(min-width: 660px)');
-                source2.setAttribute('srcset', previewFileUrl);
-                picture.appendChild(source2);
-
-                // Добавляем основное изображение
-                let img = document.createElement('img');
-                img.setAttribute('src', previewFileUrl);
-                img.setAttribute('alt', container.dataset.tags);
-                picture.appendChild(img);
-
-                // Заменяем старый img на новый picture
-                container.querySelector('.post-preview-image').parentNode.replaceChild(picture, container.querySelector('.post-preview-image'));
-
-                // Помечаем элемент как модифицированный
-                container.classList.add('bbb-modified');
-            } catch (error) {
-                console.error('Ошибка при модификации элемента:', error);
-            }
-        }
-    });
-
-    // Добавляем наблюдатель за новыми элементами
-    new MutationObserver(function(mutations) {
-        mutations.forEach(function(mutation) {
-            if (mutation.addedNodes) {
-                [...mutation.addedNodes].forEach(function(node) {
-                    if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('post-preview')) {
-                        // Применяем те же изменения к новым элементам
-                        modifyPostContainer(node);
-                    }
-                });
-            }
-        });
-    }).observe(document.body, { childList: true, subtree: true });
-});
-
-function modifyPostContainer(container) {
-    // Тот же код модификации, что и выше
-    if (!container.classList.contains('bbb-modified')) {
-        try {
-            let fileUrl = container.dataset.fileUrl;
-            let largeFileUrl = container.dataset.largeFileUrl;
-            let previewFileUrl = container.dataset.previewFileUrl;
-
-            let picture = document.createElement('picture');
-
-            let source1 = document.createElement('source');
-            source1.setAttribute('media', '(max-width: 660px)');
-            source1.setAttribute('srcset', largeFileUrl);
-            picture.appendChild(source1);
-
-            let source2 = document.createElement('source');
-            source2.setAttribute('media', '(min-width: 660px)');
-            source2.setAttribute('srcset', previewFileUrl);
-            picture.appendChild(source2);
-
-            let img = document.createElement('img');
-            img.setAttribute('src', previewFileUrl);
-            img.setAttribute('alt', container.dataset.tags);
-            picture.appendChild(img);
-
-            container.querySelector('.post-preview-image').parentNode.replaceChild(picture, container.querySelector('.post-preview-image'));
-
-            container.classList.add('bbb-modified');
-        } catch (error) {
-            console.error('Ошибка при модификации элемента:', error);
-        }
-    }
-}}
-initImageFix();
-
 function bbbInit() {
 	var bbbGMFunc; // If/else variable;
 
@@ -10662,5 +10567,6 @@ observer.observe(document.body, {
     childList: true,
     subtree: true
 });
+
 
 
