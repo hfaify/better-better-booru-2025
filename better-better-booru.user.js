@@ -10568,5 +10568,141 @@ observer.observe(document.body, {
     subtree: true
 });
 
+// Функция для проверки, является ли URL изображением
+function isImageUrl(url) {
+    const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'];
+    const extension = url.split('.').pop();
+    return imageExtensions.includes(extension.toLowerCase());
+}
+
+// Функция для замены плашки на изображение или фрейм
+function replaceGoldNoticeWithImage() {
+    // Ищем все секции с классом image-container note-container blacklist-initialized
+    const sections = document.querySelectorAll('.image-container.note-container.blacklist-initialized');
+
+    console.log('Найдено секций:', sections.length); // Отладка: проверяем количество найденных секций
+
+    // Проходим по каждой найденной секции
+    sections.forEach((section, index) => {
+        console.log(`Обрабатываем секцию №${index}`); // Отладка: номер обрабатываемой секции
+
+        // Ищем все ссылки внутри параграфов
+        const links = section.querySelectorAll('p a');
+
+        // Проверяем каждую ссылку
+        let notice;
+        for (let link of links) {
+            if (link.textContent.trim() === "You need a gold account to see this image") {
+                notice = link;
+                break;
+            }
+        }
+
+        // Проверяем наличие плашки
+        if (notice) {
+            console.log('Плашка найдена!'); // Отладка: подтверждение нахождения плашки
+
+            // Получаем источник изображения из data-атрибута секции
+            const imageSource = section.getAttribute('data-source');
+            const imageSourceLink = section.getAttribute('data-normalized-source');
+
+            // Проверяем наличие data-source
+            if (imageSource) {
+                console.log('Источник:', imageSource); // Отладка: показываем URL
+
+                if (isImageUrl(imageSource)) {
+                    // Создаем элемент picture с изображением
+                    const picture = document.createElement('picture');
+
+                    const source = document.createElement('source');
+                    source.setAttribute('media', '(max-width: 660px)');
+                    source.setAttribute('srcset', imageSource);
+                    picture.appendChild(source);
+
+                    const img = document.createElement('img');
+                    img.setAttribute('id', 'image');
+                    img.setAttribute('class', 'fit-width');
+                    img.setAttribute('alt', 'This placeholder should contain source image. If there is no image - open it in new tab: ' + imageSourceLink);
+                    img.setAttribute('src', imageSource);
+                    img.setAttribute('width', '850');
+                    img.setAttribute('height', '850');
+                    picture.appendChild(img);
+
+                    // Заменяем на изображение
+                    notice.parentNode.replaceChild(picture, notice);
+                    console.log('Изображение успешно заменено');
+                } else {
+                    // Создаем фрейм для отображения внешнего контента
+                    const iframe = document.createElement('iframe');
+                    iframe.setAttribute('src', imageSource);
+                    iframe.setAttribute('class', 'external-content');
+                    iframe.setAttribute('width', '100%');
+                    iframe.setAttribute('height', '850');
+                    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+                    iframe.style.border = '1px solid #ccc';
+
+                    // Добавляем предупреждение
+                    // Создаем контейнер с информацией
+                    const container = document.createElement('div');
+                    container.classList.add('external-content-warning');
+
+                    const warningText = document.createElement('p');
+                    warningText.textContent = 'Source cannot be displayed in a frame';
+
+                    const link = document.createElement('a');
+                    link.href = imageSource;
+                    link.target = '_blank';
+                    link.textContent = 'Open source in a new tab';
+
+                    container.appendChild(warningText);
+                    container.appendChild(link);
+
+                    notice.parentNode.replaceChild(container, notice);
+                }
+            } else {
+                console.warn('Ошибка: data-source не найден');
+            }
+        } else {
+            console.warn('Плашка не найдена в секции');
+        }
+    });
+}
+
+// Добавляем обработчик мутации DOM
+new MutationObserver(mutations => {
+    console.log('Обнаружены изменения DOM');
+
+    mutations.forEach(mutation => {
+        if (mutation.type === 'childList') {
+            replaceGoldNoticeWithImage();
+        }
+    });
+}).observe(document.body, { childList: true, subtree: true });
+
+// Первоначальное выполнение при загрузке
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('Скрипт запущен');
+    replaceGoldNoticeWithImage();
+});
+
+// Добавляем стили для фрейма
+document.head.insertAdjacentHTML('beforeend', `
+<style>
+.external-content-warning {
+    border: 1px solid #ccc;
+    padding: 15px;
+    background: #f9f9f9;
+    margin: 10px 0;
+    text-align: center;
+}
+
+.external-content-warning a {
+    display: inline-block;
+    margin-top: 10px;
+    color: #007bff;
+    text-decoration: underline;
+}
+</style>
+`);
 
 
