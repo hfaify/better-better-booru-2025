@@ -1,5 +1,13 @@
 Changelog
 ----------
+* Version 8.2.3.5:
+  * Added new feature - display images on gold posts (not working as intended. Will be fixed later).
+  * Fixed BBB Settings button not displayed
+  * Fixed If page contains gold posts all posts will disappear
+  * Fixed 404 error on most posts with child/siblings/parents
+  * Fixed user-id error (new method to get user-id)
+  * Fixed "Post content could not be located"
+  * Few other small fixes
 * Version 8.2.3:
   * Updated the post resizing to make it leave less empty vertical space.
   * Updated to support Danbooru's normalized source update.
