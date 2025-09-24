@@ -3,7 +3,7 @@
 // @namespace      https://greasyfork.org/scripts/3575-better-better-booru
 // @author         otani, modified by Jawertae, fixed by Hfaify.
 // @description    Several changes to make Danbooru much better.
-// @version        8.2.3
+// @version        8.2.3.5
 // @updateURL      https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @downloadURL    https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @match          *://*.donmai.us/*
@@ -10704,5 +10704,6 @@ document.head.insertAdjacentHTML('beforeend', `
 }
 </style>
 `);
+
 
 
