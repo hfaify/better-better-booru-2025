@@ -3,7 +3,7 @@
 // @namespace      https://greasyfork.org/scripts/3575-better-better-booru
 // @author         otani, modified by Jawertae, fixed by Hfaify.
 // @description    Several changes to make Danbooru much better.
-// @version        8.2.3.5
+// @version        8.2.3.6
 // @updateURL      https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @downloadURL    https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @match          *://*.donmai.us/*
@@ -1272,87 +1272,88 @@ function bbbScript() { // Wrapper for injecting the script into the document.
 		}
 	}
 
-	function fetchPages(url, mode, optArg, session, retries) {
-		// Retrieve an actual page for certain pieces of information.
-		var xmlhttp = new XMLHttpRequest();
-		var xmlRetries = retries || 0;
-		var xmlSession = session || bbb.session;
+function fetchPages(url, mode, optArg, session, retries) {
+    var xmlhttp = new XMLHttpRequest();
+    var xmlRetries = retries || 0;
+    var xmlSession = session || bbb.session;
 
-		if (xmlhttp !== null) {
-			xmlhttp.onreadystatechange = function() {
-				if (xmlSession !== bbb.session) // If we end up receiving an xml response form a different page, reject it.
-					xmlhttp.abort();
-				else if (xmlhttp.readyState === 4) { // 4 = "loaded"
-					if (xmlhttp.status === 200) { // 200 = "OK"
-						var docEl = document.createElement("html");
+    if (xmlhttp !== null) {
+        xmlhttp.onreadystatechange = function() {
+            if (xmlSession !== bbb.session) {
+                xmlhttp.abort();
+            } else if (xmlhttp.readyState === 4) {
+                if (xmlhttp.status === 200) {
+                    var docEl = document.createElement("html");
+                    docEl.innerHTML = xmlhttp.responseText;
 
-						docEl.innerHTML = xmlhttp.responseText;
+                    if (mode === "paginator") {
+                        bbb.flags.paginator_xml = false;
+                        replacePaginator(docEl);
+                    } else if (mode === "post_comments") {
+                        replaceComments(docEl, optArg);
+                        bbbStatus("post_comments", "done");
+                    } else if (mode === "thumbnails") {
+                        bbb.flags.thumbs_xml = false;
+                        replaceThumbnails(docEl);
+                        bbbStatus("posts", "done");
+                    } else if (mode === "endless") {
+                        bbb.flags.endless_xml = false;
+                        endlessXMLPageHandler(docEl);
+                        bbbStatus("posts", "done");
+                    } else if (mode === "account_check") {
+                        // Если пользователь не авторизован, просто завершаем без ошибок
+                        if (!Danbooru.account || !Danbooru.account.logged_in) {
+                            return;
+                        }
+                        accountUpdateHandler(docEl);
+                    }
+                } else if (!bbb.flags.unloading) {
+                    if (xmlhttp.status !== 0 && xmlRetries < 1) {
+                        xmlRetries++;
+                        fetchPages(url, mode, optArg, xmlSession, xmlRetries);
+                    } else {
+                        // Проверяем, авторизован ли пользователь
+                        if (!Danbooru.account || !Danbooru.account.logged_in) {
+                            // Для неавторизованных пользователей просто логируем ошибку в консоль
+                            console.warn("Account check failed, but user is not logged in:", xmlhttp.status);
+                            return;
+                        }
 
-						if (mode === "paginator") {
-							bbb.flags.paginator_xml = false;
+                        var linkId = uniqueIdNum();
+                        var msg;
 
-							replacePaginator(docEl);
-						}
-						else if (mode === "post_comments") {
-							replaceComments(docEl, optArg);
-							bbbStatus("post_comments", "done");
-						}
-						else if (mode === "thumbnails") {
-							bbb.flags.thumbs_xml = false;
+                        if (mode === "thumbnails" || mode === "endless") {
+                            msg = "Error retrieving post information";
+                            bbbStatus("posts", "error");
+                        } else if (mode === "post_comments") {
+                            msg = "Error retrieving comment information";
+                            bbbStatus("post_comments", "error");
+                        } else if (mode === "paginator") {
+                            msg = "Error updating paginator";
+                        } else if (mode === "account_check") {
+                            msg = "Error checking account settings";
+                        }
 
-							replaceThumbnails(docEl);
-							bbbStatus("posts", "done");
-						}
-						else if (mode === "endless") {
-							bbb.flags.endless_xml = false;
+                        var noticeMsg = bbbNotice(msg + ' (HTML Code: ' + xmlhttp.status + ' ' + xmlhttp.statusText + '). ' + 
+                            (xmlhttp.status === 0 ? 'The connection was unexpectedly cancelled or timed out. ' : '') + 
+                            '(<a id="' + linkId + '" href="#">Retry</a>)', -1);
 
-							endlessXMLPageHandler(docEl);
-							bbbStatus("posts", "done");
-						}
-						else if (mode === "account_check")
-							accountUpdateHandler(docEl);
-					}
-					else if (!bbb.flags.unloading) {
-						if (xmlhttp.status !== 0 && xmlRetries < 1) {
-							xmlRetries++;
-							fetchPages(url, mode, optArg, xmlSession, xmlRetries);
-						}
-						else {
-							var linkId = uniqueIdNum(); // Create a unique ID.
-							var msg; // If/else variable.
+                        document.getElementById(linkId).addEventListener("click", function(event) {
+                            if (event.button !== 0) return;
+                            closeBbbNoticeMsg(noticeMsg);
+                            searchPages(mode, optArg);
+                            event.preventDefault();
+                        }, false);
+                    }
+                }
+            }
+        };
 
-							if (mode === "thumbnails" || mode === "endless") {
-								msg = "Error retrieving post information";
-								bbbStatus("posts", "error");
-							}
-							else if (mode === "post_comments") {
-								msg = "Error retrieving comment information";
-								bbbStatus("post_comments", "error");
-							}
-							else if (mode === "paginator")
-								msg = "Error updating paginator";
-							else if (mode === "account_check")
-								msg = "Error checking account settings";
-
-							var noticeMsg = bbbNotice(msg + ' (HTML Code: ' + xmlhttp.status + ' ' + xmlhttp.statusText + '). ' + (xmlhttp.status === 0 ? 'The connection was unexpectedly cancelled or timed out. ' : '') + '(<a id="' + linkId + '" href="#">Retry</a>)', -1);
-
-							document.getElementById(linkId).addEventListener("click", function(event) {
-								if (event.button !== 0)
-									return;
-
-								closeBbbNoticeMsg(noticeMsg);
-								searchPages(mode, optArg);
-								event.preventDefault();
-							}, false);
-						}
-					}
-				}
-			};
-			xmlhttp.open("GET", url, true);
-			xmlhttp.timeout = 120000;
-			xmlhttp.send(null);
-		}
-	}
+        xmlhttp.open("GET", url, true);
+        xmlhttp.timeout = 120000;
+        xmlhttp.send(null);
+    }
+}
 
 	function replacePaginator(el) {
 		// Replace the contents inside the paginator div so as to preserve the original div and any event listeners attached to it.
@@ -10704,6 +10705,7 @@ document.head.insertAdjacentHTML('beforeend', `
 }
 </style>
 `);
+
 
 
 
