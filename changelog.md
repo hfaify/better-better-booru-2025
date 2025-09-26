@@ -1,5 +1,7 @@
 Changelog
 ----------
+* Version 8.2.3.6:
+  * Fixed 404 account check error for not logged in users (well not actually fix, just message with this error now in console).
 * Version 8.2.3.5:
   * Added new feature - display images on gold posts (not working as intended. Will be fixed later).
   * Fixed BBB Settings button not displayed
