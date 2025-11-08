@@ -1714,7 +1714,7 @@ function bbbScript() { // Wrapper for injecting the script into the document.
 				return nextLink.href;
 		}
 
-		else {return undefined;}
+		return undefined;
 	}
 
 	function getMeta(meta, docEl) {
@@ -10688,6 +10688,7 @@ document.head.insertAdjacentHTML('beforeend', `
 }
 </style>
 `);
+
 
 
 
