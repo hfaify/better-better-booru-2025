@@ -3,7 +3,7 @@
 // @namespace      https://greasyfork.org/scripts/3575-better-better-booru
 // @author         otani, modified by Jawertae, fixed by Hfaify.
 // @description    Several changes to make Danbooru much better.
-// @version        8.2.3.7
+// @version        8.2.3.8
 // @updateURL      https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @downloadURL    https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @match          *://*.donmai.us/*
@@ -1274,87 +1274,88 @@ function bbbScript() { // Wrapper for injecting the script into the document.
 		}
 	}
 
-function fetchPages(url, mode, optArg, session, retries) {
-		// Retrieve an actual page for certain pieces of information.
-		var xmlhttp = new XMLHttpRequest();
-		var xmlRetries = retries || 0;
-		var xmlSession = session || bbb.session;
+    function fetchPages(url, mode, optArg, session, retries) {
+        var xmlhttp = new XMLHttpRequest();
+        var xmlRetries = retries || 0;
+        var xmlSession = session || bbb.session;
 
-		if (xmlhttp !== null) {
-			xmlhttp.onreadystatechange = function() {
-				if (xmlSession !== bbb.session) // If we end up receiving an xml response form a different page, reject it.
-					xmlhttp.abort();
-				else if (xmlhttp.readyState === 4) { // 4 = "loaded"
-					if (xmlhttp.status === 200) { // 200 = "OK"
-						var docEl = document.createElement("html");
+        if (xmlhttp !== null) {
+            xmlhttp.onreadystatechange = function() {
+                if (xmlSession !== bbb.session) {
+                    xmlhttp.abort();
+                } else if (xmlhttp.readyState === 4) {
+                    if (xmlhttp.status === 200) {
+                        var docEl = document.createElement("html");
+                        docEl.innerHTML = xmlhttp.responseText;
 
-						docEl.innerHTML = xmlhttp.responseText;
+                        if (mode === "paginator") {
+                            bbb.flags.paginator_xml = false;
+                            replacePaginator(docEl);
+                        } else if (mode === "post_comments") {
+                            replaceComments(docEl, optArg);
+                            bbbStatus("post_comments", "done");
+                        } else if (mode === "thumbnails") {
+                            bbb.flags.thumbs_xml = false;
+                            replaceThumbnails(docEl);
+                            bbbStatus("posts", "done");
+                        } else if (mode === "endless") {
+                            bbb.flags.endless_xml = false;
+                            endlessXMLPageHandler(docEl);
+                            bbbStatus("posts", "done");
+                        } else if (mode === "account_check") {
+                            // Если пользователь не авторизован, просто завершаем без ошибок
+                            if (!Danbooru.account || !Danbooru.account.logged_in) {
+                                return;
+                            }
+                            accountUpdateHandler(docEl);
+                        }
+                    } else if (!bbb.flags.unloading) {
+                        if (xmlhttp.status !== 0 && xmlRetries < 1) {
+                            xmlRetries++;
+                            fetchPages(url, mode, optArg, xmlSession, xmlRetries);
+                        } else {
+                            // Проверяем, авторизован ли пользователь
+                            if (!Danbooru.account || !Danbooru.account.logged_in) {
+                                // Для неавторизованных пользователей просто логируем ошибку в консоль
+                                console.warn("Account check failed, but user is not logged in:", xmlhttp.status, ". Some functions works only with user api. Check Preferences tab for more info");
+                                return;
+                            }
 
-						if (mode === "paginator") {
-							bbb.flags.paginator_xml = false;
+                            var linkId = uniqueIdNum();
+                            var msg;
 
-							replacePaginator(docEl);
-						}
-						else if (mode === "post_comments") {
-							replaceComments(docEl, optArg);
-							bbbStatus("post_comments", "done");
-						}
-						else if (mode === "thumbnails") {
-							bbb.flags.thumbs_xml = false;
+                            if (mode === "thumbnails" || mode === "endless") {
+                                msg = "Error retrieving post information";
+                                bbbStatus("posts", "error");
+                            } else if (mode === "post_comments") {
+                                msg = "Error retrieving comment information";
+                                bbbStatus("post_comments", "error");
+                            } else if (mode === "paginator") {
+                                msg = "Error updating paginator";
+                            } else if (mode === "account_check") {
+                                msg = "Error checking account settings";
+                            }
 
-							replaceThumbnails(docEl);
-							bbbStatus("posts", "done");
-						}
-						else if (mode === "endless") {
-							bbb.flags.endless_xml = false;
+                            var noticeMsg = bbbNotice(msg + ' (HTML Code: ' + xmlhttp.status + ' ' + xmlhttp.statusText + '). ' +
+                                                      (xmlhttp.status === 0 ? 'The connection was unexpectedly cancelled or timed out. ' : '') +
+                                                      '(<a id="' + linkId + '" href="#">Retry</a>)', -1);
 
-							endlessXMLPageHandler(docEl);
-							bbbStatus("posts", "done");
-						}
-						else if (mode === "account_check")
-							accountUpdateHandler(docEl);
-					}
-					else if (!bbb.flags.unloading) {
-						if (xmlhttp.status !== 0 && xmlRetries < 1) {
-							xmlRetries++;
-							fetchPages(url, mode, optArg, xmlSession, xmlRetries);
-						}
-						else {
-							var linkId = uniqueIdNum(); // Create a unique ID.
-							var msg; // If/else variable.
+                            document.getElementById(linkId).addEventListener("click", function(event) {
+                                if (event.button !== 0) return;
+                                closeBbbNoticeMsg(noticeMsg);
+                                searchPages(mode, optArg);
+                                event.preventDefault();
+                            }, false);
+                        }
+                    }
+                }
+            };
 
-							if (mode === "thumbnails" || mode === "endless") {
-								msg = "Error retrieving post information";
-								bbbStatus("posts", "error");
-							}
-							else if (mode === "post_comments") {
-								msg = "Error retrieving comment information";
-								bbbStatus("post_comments", "error");
-							}
-							else if (mode === "paginator")
-								msg = "Error updating paginator";
-							else if (mode === "account_check")
-								msg = "Error checking account settings";
-
-							var noticeMsg = bbbNotice(msg + ' (HTML Code: ' + xmlhttp.status + ' ' + xmlhttp.statusText + '). ' + (xmlhttp.status === 0 ? 'The connection was unexpectedly cancelled or timed out. ' : '') + '(<a id="' + linkId + '" href="#">Retry</a>)', -1);
-
-							document.getElementById(linkId).addEventListener("click", function(event) {
-								if (event.button !== 0)
-									return;
-
-								closeBbbNoticeMsg(noticeMsg);
-								searchPages(mode, optArg);
-								event.preventDefault();
-							}, false);
-						}
-					}
-				}
-			};
-			xmlhttp.open("GET", url, true);
-			xmlhttp.timeout = 120000;
-			xmlhttp.send(null);
-		}
-	}
+        xmlhttp.open("GET", url, true);
+        xmlhttp.timeout = 120000;
+        xmlhttp.send(null);
+    }
+}
 
 	function replacePaginator(el) {
 		// Replace the contents inside the paginator div so as to preserve the original div and any event listeners attached to it.
@@ -1640,14 +1641,8 @@ function fetchPages(url, mode, optArg, session, retries) {
 	}
 
 	function getPaginator(target) {
-		// Return the paginator of the document or a specific element.
-		if (!target || target === document) // Paginator in the document.
-			return document.getElementsByClassName("paginator")[0];
-		else if (!target.bbbHasClass("paginator")) // Paginator in a specific element.
-			return target.getElementsByClassName("paginator")[0];
-		else // Single specific paginator.
-			return target;
-	}
+    return document.querySelector('.paginator.numbered-paginator');
+    }
 
 	function getThumbContainer(mode, docEl) {
 		// Retrieve the element that contains the thumbnails.
@@ -1719,7 +1714,7 @@ function fetchPages(url, mode, optArg, session, retries) {
 				return nextLink.href;
 		}
 
-		return undefined;
+		else {return undefined;}
 	}
 
 	function getMeta(meta, docEl) {
@@ -6565,30 +6560,17 @@ function fetchPages(url, mode, optArg, session, retries) {
 		return url;
 	}
 
-	function fixPaginator(target) {
-		// Determine whether the paginator needs to be updated and request one as needed.
-		var paginator = getPaginator(target);
+    function fixPaginator(target) {
+        var paginator = getPaginator(target);
 
-		if (!paginator || gLoc === "pool" || gLoc === "favorite_group" || !allowUserLimit())
-			return;
+        if (paginator) {
+            var pageLinks = paginator.querySelectorAll('.paginator-page');
 
-		if (/\d/.test(paginator.textContent)) { // Fix numbered paginators.
-			// Fix existing paginator with user's custom limit.
-			var pageLinks = paginator.getElementsByTagName("a");
-
-			for (var i = 0, il = pageLinks.length; i < il; i++) {
-				var pageLink = pageLinks[i];
-				pageLink.href = updateURLQuery(pageLink.href, {limit: thumbnail_count});
-			}
-
-			searchPages("paginator");
-		}
-		else { // Fix next/previous paginators.
-			paginator.innerHTML = "<p>Loading...</p>"; // Disable the paginator while fixing it.
-
-			searchPages("paginator");
-		}
-	}
+            for (var i = 0; i < pageLinks.length; i++) {
+                pageLinks[i].href = updateURLQuery(pageLinks[i].href, {limit: thumbnail_count});
+            }
+        }
+    }
 
 	function fixCommentSearch() {
 		// Fix the thumbnails for hidden posts in the comment search.
@@ -8013,30 +7995,29 @@ function fetchPages(url, mode, optArg, session, retries) {
 		// Set up the page counter.
 		var pageDiv = document.getElementById("page");
 		var paginator = getPaginator();
+        var pageLinks = paginator.querySelectorAll('.paginator-page');
 
-		if (!page_counter || !paginator || !pageDiv)
-			return;
+		if (!page_counter)
+        {console.log('No page_counter');
+            return;}
+        else if (!paginator) {console.log('No paginator');
+            return;}
+        else if (!pageDiv) {console.log('No pageDiv');
+            return;}
+        else if (!pageLinks) {console.log('No pageLinks');
+            return;}
 
 		var numString = "";
 		var lastNumString; // If/else variable.
 
 		// Provide page number info if available.
 		if (/\d/.test(paginator.textContent)) {
-			var activePage = paginator.getElementsByClassName("current-page")[0];
+			var activePage = paginator.querySelector('.paginator-current');
 			var pageItems = paginator.getElementsByTagName("li");
 			var numPageItems = pageItems.length;
 			var lastPageItem = pageItems[numPageItems - 1];
-			var activeNum = activePage.textContent.bbbSpaceClean();
-			var lastNum; // If/else variable.
-
-			if (activePage.parentNode === lastPageItem) // Last/only page case.
-				lastNum = activeNum;
-			else { // In all other cases, there should always be a next page button and at least two other page items (1-X).
-				lastNum = lastPageItem.previousElementSibling.textContent.bbbSpaceClean();
-
-				if (!bbbIsNum(lastNum)) // Too many pages for the current user to view.
-					lastNum = "";
-			}
+			var activeNum = activePage.textContent.trim();
+			var lastNum = pageLinks[pageLinks.length - 1].textContent.trim();
 
 			lastNumString = (lastNum ? " of " + lastNum : "");
 			numString = 'Page ' + activeNum + '<span id="bbb-page-counter-last">' + lastNumString + '</span> | ';
