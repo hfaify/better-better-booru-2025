@@ -3,7 +3,7 @@
 // @namespace      https://greasyfork.org/scripts/3575-better-better-booru
 // @author         otani, modified by Jawertae, fixed by Hfaify.
 // @description    Several changes to make Danbooru much better.
-// @version        8.3.5.1
+// @version        8.3.6
 // @updateURL      https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @downloadURL    https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @match          *://*.donmai.us/*
@@ -4774,10 +4774,18 @@ function bbbScript() { // Wrapper for injecting the script into the document.
 		danbModeMenu(target);
 	}
 
-	function createThumbHTML(postInfo, query) {
-		// Create a thumbnail HTML string.
-		return '<article class="post-preview' + postInfo.thumb_class + '" id="post_' + postInfo.id + '" data-id="' + postInfo.id + '" data-has-sound="' + postInfo.has_sound + '" data-tags="' + postInfo.tag_string + '" data-pools="' + postInfo.pool_string + '" data-uploader="' + postInfo.uploader_name + '" data-rating="' + postInfo.rating + '" data-width="' + postInfo.image_width + '" data-height="' + postInfo.image_height + '" data-flags="' + postInfo.flags + '" data-parent-id="' + postInfo.parent_id + '" data-has-children="' + postInfo.has_children + '" data-score="' + postInfo.score + '" data-fav-count="' + postInfo.fav_count + '" data-approver-id="' + postInfo.approver_id + '" data-pixiv-id="' + postInfo.pixiv_id + '" data-md5="' + postInfo.md5 + '" data-file-ext="' + postInfo.file_ext + '" data-file-url="' + postInfo.file_url + '" data-large-file-url="' + postInfo.large_file_url + '" data-preview-file-url="' + postInfo.preview_file_url + '" data-source="' + postInfo.source + '" data-top-tagger="' + postInfo.keeper_data.uid + '" data-uploader-id="' + postInfo.uploader_id + '" data-normalized-source="' + postInfo.normalized_source + '" data-is-favorited="' + postInfo.is_favorited + '" data-file-url-desc="' + postInfo.file_url_desc + '"><a href="/posts/' + postInfo.id + query + '"><picture><source media="(max-width: 660px)" srcset="' + postInfo.crop_img_src + '"><source media="(min-width: 660px)" srcset="' + postInfo.preview_img_src + '"><img src="' + postInfo.preview_img_src + '" alt="' + postInfo.tag_string + '"></picture></a></article>';
-	}
+    function createThumbHTML(postInfo, query) {
+    // 1. Очищаем теги от кавычек для безопасности атрибутов
+    var cleanTags = postInfo.tag_string ? postInfo.tag_string.replace(/"/g, '&quot;') : '';
+    var displayRating = postInfo.rating || 'g';
+    var displayScore = typeof(postInfo.score) === "number" ? postInfo.score : "0";
+
+    // 2. Формируем data-title, который жизненно необходим движку Danbooru для цветного окна!
+    var dataTitleAttr = cleanTags + " rating:" + displayRating + " score:" + displayScore;
+
+    // 3. Возвращаем оригинальный шаблон Danbooru: пустой title, верный alt, data-title и aria-expanded!
+    return '<article class="post-preview' + postInfo.thumb_class + '" id="post_' + postInfo.id + '" data-id="' + postInfo.id + '" data-has-sound="' + postInfo.has_sound + '" data-tags="' + postInfo.tag_string + '" data-pools="' + postInfo.pool_string + '" data-uploader="' + postInfo.uploader_name + '" data-rating="' + postInfo.rating + '" data-width="' + postInfo.image_width + '" data-height="' + postInfo.image_height + '" data-flags="' + postInfo.flags + '" data-parent-id="' + postInfo.parent_id + '" data-has-children="' + postInfo.has_children + '" data-score="' + postInfo.score + '" data-fav-count="' + postInfo.fav_count + '" data-approver-id="' + postInfo.approver_id + '" data-pixiv-id="' + postInfo.pixiv_id + '" data-md5="' + postInfo.md5 + '" data-file-ext="' + postInfo.file_ext + '" data-file-url="' + postInfo.file_url + '" data-large-file-url="' + postInfo.large_file_url + '" data-preview-file-url="' + postInfo.preview_file_url + '" data-source="' + postInfo.source + '" data-top-tagger="' + postInfo.keeper_data.uid + '" data-uploader-id="' + postInfo.uploader_id + '" data-normalized-source="' + postInfo.normalized_source + '" data-is-favorited="' + postInfo.is_favorited + '" data-file-url-desc="' + postInfo.file_url_desc + '"><a href="/posts/' + postInfo.id + query + '"><picture><source media="(max-width: 660px)" srcset="' + postInfo.crop_img_src + '"><source media="(min-width: 660px)" srcset="' + postInfo.preview_img_src + '"><img src="' + postInfo.preview_img_src + '" class="post-preview-image" title="" alt="post #' + postInfo.id + '" draggable="false" aria-expanded="false" data-title="' + dataTitleAttr + '"></picture></a></article>';
+    }
 
 	function createThumb(postInfo, query) {
 		// Create a thumbnail element. (lazy method <_<)
@@ -10712,9 +10720,7 @@ if (pixivId && pixivId !== "") {
         pictureElement.remove();
         thumbLink.appendChild(newImg);
 
-        thumbLink.style.borderColor = '#00ff00';
-        thumbLink.style.borderStyle = 'solid';
-        thumbLink.style.borderWidth = '2px';
+
     }
 }
 }
