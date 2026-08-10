@@ -3,7 +3,7 @@
 // @namespace      https://greasyfork.org/scripts/3575-better-better-booru
 // @author         otani, modified by Jawertae, fixed by Hfaify.
 // @description    Several changes to make Danbooru much better.
-// @version        8.3.5
+// @version        8.3.5.1
 // @updateURL      https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @downloadURL    https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @match          *://*.donmai.us/*
@@ -10573,19 +10573,38 @@ async function fixHiddenGoldPages() {
         // Генерируем HTML-код карточек постов
         let postsHtml = '';
         postsData.forEach(postJson => {
+            if (document.getElementById(`post_${postJson.id}`)) return;
+
+            // 1. ПРАВИЛЬНО ОБЪЯВЛЯЕМ ПЕРЕМЕННЫЕ ИЗ JSON
             const pixivId = postJson.pixiv_id || postJson.media_asset?.pixiv_id || '';
             const fileExt = postJson.file_ext || 'jpg';
+            const sourceUrl = postJson.source || '';
 
             let statusClass = '';
             if (postJson.is_deleted) statusClass = ' post-status-deleted';
             if (postJson.is_pending) statusClass = ' post-status-pending';
 
+            // 2. РАССЧИТЫВАЕМ ИНДЕКС СТРАНИЦЫ ДЛЯ СИБЛИНГОВ (ПАКОВ)
+            let proxyUrl = `https://pixiv.cat{pixivId}.${fileExt}`;
+
+            if (pixivId && (sourceUrl.includes('pixiv.net') || sourceUrl.includes('pximg.net'))) {
+                const pageMatch = sourceUrl.match(/_p(\d+)/) || sourceUrl.match(/page=(\d+)/);
+                if (pageMatch) {
+                    const pageIndex = parseInt(pageMatch[1]) + 1; // Берем именно цифру из группы [1]
+                    if (pageIndex > 1) {
+                        proxyUrl = `https://pixiv.cat{pixivId}-${pageIndex}.${fileExt}`;
+                    }
+                }
+            }
+
+            // 3. СОБИРАЕМ HTML С ПРАВИЛЬНЫМИ ПЕРЕМЕННЫМИ
             postsHtml += `
                 <article class="post-preview post-preview-fit-compact post-preview-180 blacklist-initialized${statusClass}"
                          id="post_${postJson.id}"
                          data-id="${postJson.id}"
                          data-pixiv-id="${pixivId}"
-                         data-file-ext="${fileExt}">
+                         data-file-ext="${fileExt}"
+                         data-source="${sourceUrl.replace(/"/g, '&quot;')}">
                     <div class="post-preview-container">
                         <a href="/posts/${postJson.id}" class="bbb-thumb-link bbb-custom-tag">
                             <picture>
@@ -10653,36 +10672,51 @@ if (pixivId && pixivId !== "") {
     }
 
     // 2. Активируем тяжелую артиллерию ТОЛЬКО для постов с заглушками
-    if (isGoldPlaceholder) {
-        const proxyUrl = `https://pixiv.cat/${pixivId}.${fileExt}`;
-        const pictureElement = post.querySelector('picture');
-        const thumbLink = post.querySelector('.bbb-thumb-link');
+   if (isGoldPlaceholder) {
+    let proxyUrl = `https://pixiv.cat/${pixivId}.${fileExt}`;
 
-        if (pictureElement && thumbLink) {
-            const newImg = document.createElement('img');
-            newImg.src = proxyUrl;
-            newImg.className = 'post-preview-image';
+    // Безопасно вытаскиваем оригинальный source-URL поста из HTML-атрибутов
+    const sourceUrl = post.getAttribute('data-source') || '';
 
-            newImg.style.maxWidth = '100%';
-            newImg.style.height = 'auto';
-            newImg.style.objectFit = 'contain';
+    if (sourceUrl.includes('pixiv.net') || sourceUrl.includes('pximg.net')) {
+        const pageMatch = sourceUrl.match(/_p(\d+)/) || sourceUrl.match(/page=(\d+)/);
 
-            const oldImg = pictureElement.querySelector('img');
-            if (oldImg) {
-                newImg.alt = oldImg.alt || '';
-                newImg.title = oldImg.title || '';
+        if (pageMatch) {
+            // pageMatch[1] гарантированно вытащит цифру из скобок
+            const pageIndex = parseInt(pageMatch[1]) + 1;
+
+            if (pageIndex > 1) {
+                proxyUrl = `https://pixiv.cat/${pixivId}-${pageIndex}.${fileExt}`;
             }
-
-            // Полностью сносим старый контейнер, ломая логику родному LazyLoad
-            pictureElement.remove();
-            thumbLink.appendChild(newImg);
-
-            // Зеленая рамка ТОЛЬКО на взломанных постах
-            thumbLink.style.borderColor = '#00ff00';
-            thumbLink.style.borderStyle = 'solid';
-            thumbLink.style.borderWidth = '2px';
         }
     }
+
+    const pictureElement = post.querySelector('picture');
+    const thumbLink = post.querySelector('.bbb-thumb-link');
+
+    if (pictureElement && thumbLink) {
+        const newImg = document.createElement('img');
+        newImg.src = proxyUrl;
+        newImg.className = 'post-preview-image';
+
+        newImg.style.maxWidth = '100%';
+        newImg.style.height = 'auto';
+        newImg.style.objectFit = 'contain';
+
+        const oldImg = pictureElement.querySelector('img');
+        if (oldImg) {
+            newImg.alt = oldImg.alt || '';
+            newImg.title = oldImg.title || '';
+        }
+
+        pictureElement.remove();
+        thumbLink.appendChild(newImg);
+
+        thumbLink.style.borderColor = '#00ff00';
+        thumbLink.style.borderStyle = 'solid';
+        thumbLink.style.borderWidth = '2px';
+    }
+}
 }
     });
 }
