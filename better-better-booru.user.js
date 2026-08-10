@@ -3,7 +3,7 @@
 // @namespace      https://greasyfork.org/scripts/3575-better-better-booru
 // @author         otani, modified by Jawertae, fixed by Hfaify.
 // @description    Several changes to make Danbooru much better.
-// @version        8.2.3.8
+// @version        8.3
 // @updateURL      https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @downloadURL    https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @match          *://*.donmai.us/*
@@ -10505,170 +10505,107 @@ function bbbInit() {
 	script.appendChild(document.createTextNode('window.bbbGMFunc = ' + bbbGMFunc + '; ' + bbbScript + '(' + runBBBScript + ')();'));
 	document.body.appendChild(script);
 	window.setTimeout(function() { document.body.removeChild(script); }, 0);
+
 }
 
 bbbInit();
 
-function fixPostClasses() {
-    // Получаем все посты
-    const posts = document.querySelectorAll('.post-preview');
+// Основная функция для обработки постов
+async function processAndFixPosts() {
+    // Находим все посты, которые мы ЕЩЕ НЕ обрабатывали
+    const posts = document.querySelectorAll('.post-preview:not([data-bbb-processed])');
 
-    // Проходим по каждому посту
-    posts.forEach(function(post) {
-        // Удаляем нежелательный класс post_*id*
-        const currentClasses = post.classList;
+    posts.forEach((post) => {
+        // Ставим маркер, чтобы функция больше никогда не обрабатывала этот пост повторно
+        post.setAttribute('data-bbb-processed', 'true');
 
-        // Находим и удаляем класс, начинающийся с "post_"
-        for (let i = 0; i < currentClasses.length; i++) {
-            if (/^post_\\d+$/.test(currentClasses[i])) {
-                post.classList.remove(currentClasses[i]);
+        // --- 1. Исправление классов (Ваш рабочий фикс) ---
+        const currentClasses = Array.from(post.classList);
+        for (let className of currentClasses) {
+            if (/^post_\d+$/.test(className)) {
+                post.classList.remove(className);
             }
         }
+        post.classList.add('post-preview-fit-compact', 'post-preview-180', 'blacklist-initialized');
 
-        // Добавляем необходимые классы
-        post.classList.add('post-preview-fit-compact');
-        post.classList.add('post-preview-180');
-        post.classList.add('blacklist-initialized');
+// --- 2. Обход Gold-аккаунта через Pixiv-Proxy ---
+const pixivId = post.getAttribute('data-pixiv-id');
+const fileExt = post.getAttribute('data-file-ext') || 'jpg';
+
+if (pixivId && pixivId !== "") {
+    // 1. Сначала проверяем, является ли этот пост заблокированным (имеет ли он заглушку)
+    const sourceElements = post.querySelectorAll('picture source, picture img');
+    let isGoldPlaceholder = false;
+
+    for (let element of sourceElements) {
+        const srcset = element.getAttribute('srcset') || element.getAttribute('src') || '';
+        if (srcset.includes('data:image/png;base64')) {
+            isGoldPlaceholder = true;
+            break; // Нашли заглушку, дальше можно не искать
+        }
+    }
+
+    // 2. Активируем тяжелую артиллерию ТОЛЬКО для постов с заглушками
+    if (isGoldPlaceholder) {
+        const proxyUrl = `https://pixiv.cat/${pixivId}.${fileExt}`;
+        const pictureElement = post.querySelector('picture');
+        const thumbLink = post.querySelector('.bbb-thumb-link');
+
+        if (pictureElement && thumbLink) {
+            const newImg = document.createElement('img');
+            newImg.src = proxyUrl;
+            newImg.className = 'post-preview-image';
+
+            newImg.style.maxWidth = '100%';
+            newImg.style.height = 'auto';
+            newImg.style.objectFit = 'contain';
+
+            const oldImg = pictureElement.querySelector('img');
+            if (oldImg) {
+                newImg.alt = oldImg.alt || '';
+                newImg.title = oldImg.title || '';
+            }
+
+            // Полностью сносим старый контейнер, ломая логику родному LazyLoad
+            pictureElement.remove();
+            thumbLink.appendChild(newImg);
+
+            // Зеленая рамка ТОЛЬКО на взломанных постах
+            thumbLink.style.borderColor = '#00ff00';
+            thumbLink.style.borderStyle = 'solid';
+            thumbLink.style.borderWidth = '2px';
+        }
+    }
+}
     });
 }
 
-// Вызываем функцию после полной загрузки DOM
-document.addEventListener('DOMContentLoaded', function() {
-    // Добавляем небольшую задержку для гарантии
-    setTimeout(() => {
-        fixPostClasses();
-    }, 500);
+// Настройка MutationObserver для отслеживания новых страниц/постов
+const observer = new MutationObserver((mutations) => {
+    let shouldProcess = false;
+    for (const mutation of mutations) {
+        if (mutation.addedNodes.length > 0) {
+            shouldProcess = true;
+            break;
+        }
+    }
+    if (shouldProcess) {
+        processAndFixPosts();
+    }
 });
 
-// Также можно добавить повторный вызов при изменении DOM
-const observer = new MutationObserver(() => {
-    setTimeout(() => {
-        fixPostClasses();
-    }, 500);
-});
+// Запуск при загрузке страницы
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', processAndFixPosts);
+} else {
+    processAndFixPosts();
+}
 
+// Запуск слежения за добавлением новых постов (для скрипта увеличения страниц)
 observer.observe(document.body, {
     childList: true,
     subtree: true
 });
-
-// Функция для проверки, является ли URL изображением
-function isImageUrl(url) {
-    const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'];
-    const extension = url.split('.').pop();
-    return imageExtensions.includes(extension.toLowerCase());
-}
-
-// Функция для замены плашки на изображение или фрейм
-function replaceGoldNoticeWithImage() {
-    // Ищем все секции с классом image-container note-container blacklist-initialized
-    const sections = document.querySelectorAll('.image-container.note-container.blacklist-initialized');
-
-    console.log('Найдено секций:', sections.length); // Отладка: проверяем количество найденных секций
-
-    // Проходим по каждой найденной секции
-    sections.forEach((section, index) => {
-        console.log(`Обрабатываем секцию №${index}`); // Отладка: номер обрабатываемой секции
-
-        // Ищем все ссылки внутри параграфов
-        const links = section.querySelectorAll('p a');
-
-        // Проверяем каждую ссылку
-        let notice;
-        for (let link of links) {
-            if (link.textContent.trim() === "You need a gold account to see this image") {
-                notice = link;
-                break;
-            }
-        }
-
-        // Проверяем наличие плашки
-        if (notice) {
-            console.log('Плашка найдена!'); // Отладка: подтверждение нахождения плашки
-
-            // Получаем источник изображения из data-атрибута секции
-            const imageSource = section.getAttribute('data-source');
-            const imageSourceLink = section.getAttribute('data-normalized-source');
-
-            // Проверяем наличие data-source
-            if (imageSource) {
-                console.log('Источник:', imageSource); // Отладка: показываем URL
-
-                if (isImageUrl(imageSource)) {
-                    // Создаем элемент picture с изображением
-                    const picture = document.createElement('picture');
-
-                    const source = document.createElement('source');
-                    source.setAttribute('media', '(max-width: 660px)');
-                    source.setAttribute('srcset', imageSource);
-                    picture.appendChild(source);
-
-                    const img = document.createElement('img');
-                    img.setAttribute('id', 'image');
-                    img.setAttribute('class', 'fit-width');
-                    img.setAttribute('alt', 'This placeholder should contain source image. If there is no image - open it in new tab: ' + imageSourceLink);
-                    img.setAttribute('src', imageSource);
-                    img.setAttribute('width', '850');
-                    img.setAttribute('height', '850');
-                    picture.appendChild(img);
-
-                    // Заменяем на изображение
-                    notice.parentNode.replaceChild(picture, notice);
-                    console.log('Изображение успешно заменено');
-                } else {
-                    // Создаем фрейм для отображения внешнего контента
-                    const iframe = document.createElement('iframe');
-                    iframe.setAttribute('src', imageSource);
-                    iframe.setAttribute('class', 'external-content');
-                    iframe.setAttribute('width', '100%');
-                    iframe.setAttribute('height', '850');
-                    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
-                    iframe.style.border = '1px solid #ccc';
-
-                    // Добавляем предупреждение
-                    // Создаем контейнер с информацией
-                    const container = document.createElement('div');
-                    container.classList.add('external-content-warning');
-
-                    const warningText = document.createElement('p');
-                    warningText.textContent = 'Source cannot be displayed in a frame';
-
-                    const link = document.createElement('a');
-                    link.href = imageSource;
-                    link.target = '_blank';
-                    link.textContent = 'Open source in a new tab';
-
-                    container.appendChild(warningText);
-                    container.appendChild(link);
-
-                    notice.parentNode.replaceChild(container, notice);
-                }
-            } else {
-                console.warn('Ошибка: data-source не найден');
-            }
-        } else {
-            console.warn('Плашка не найдена в секции');
-        }
-    });
-}
-
-// Добавляем обработчик мутации DOM
-new MutationObserver(mutations => {
-    console.log('Обнаружены изменения DOM');
-
-    mutations.forEach(mutation => {
-        if (mutation.type === 'childList') {
-            replaceGoldNoticeWithImage();
-        }
-    });
-}).observe(document.body, { childList: true, subtree: true });
-
-// Первоначальное выполнение при загрузке
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('Скрипт запущен');
-    replaceGoldNoticeWithImage();
-});
-
 // Добавляем стили для фрейма
 document.head.insertAdjacentHTML('beforeend', `
 <style>
@@ -10689,6 +10626,36 @@ document.head.insertAdjacentHTML('beforeend', `
 </style>
 `);
 
+
+function updatePostNotices() {
+    const params = new URLSearchParams(window.location.search);
+    let searchQuery = params.get('tags') || params.get('q');
+
+    if (!searchQuery) {
+        searchQuery = 'status:any';
+    }
+
+    // Обновляем текст в search-name
+    document.querySelectorAll('.search-name').forEach(searchName => {
+        searchName.innerHTML = `Search: <a rel="nofollow" href="/posts?tags=${encodeURIComponent(searchQuery)}">${searchQuery}</a>`;
+    });
+
+    // Обновляем ссылки prev/next
+    document.querySelectorAll('.prev, .next').forEach(link => {
+        const href = new URL(link.href);
+        const searchParams = new URLSearchParams(href.search);
+        searchParams.set('q', searchQuery);
+        href.search = searchParams.toString();
+        link.href = href.toString();
+    });
+}
+
+// Добавляем обработчики событий
+window.addEventListener('popstate', updatePostNotices);
+window.addEventListener('hashchange', updatePostNotices);
+
+
+updatePostNotices();
 
 
 
