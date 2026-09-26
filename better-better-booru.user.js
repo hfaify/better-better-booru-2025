@@ -3,7 +3,7 @@
 // @namespace      https://greasyfork.org/scripts/3575-better-better-booru
 // @author         otani, modified by Jawertae, fixed by Hfaify.
 // @description    Several changes to make Danbooru much better.
-// @version        8.3.6
+// @version        8.4
 // @updateURL      https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @downloadURL    https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @match          *://*.donmai.us/*
@@ -4834,96 +4834,122 @@ function bbbScript() { // Wrapper for injecting the script into the document.
 	}
 
 	function updateThumbListing(thumbs) {
-		// Take a collection of thumbnails and use them to update the original thumbnail listing as appropriate.
-		var thumbContainer = getThumbContainer(gLoc);
-		var before = getThumbSibling(gLoc);
-		var newContainer; // If/else variable.
+    // Take a collection of thumbnails and use them to update the
+    // original thumbnail listing as appropriate.
+    var thumbContainer = getThumbContainer(gLoc);
+    var before = getThumbSibling(gLoc);
+    var newContainer; // If/else variable.
 
-		if (!thumbContainer) {
-			bbbNotice("Thumbnail section could not be located.", -1);
-			return;
-		}
+    if (!thumbContainer) {
+        bbbNotice("Thumbnail section could not be located.", -1);
+        return;
+    }
 
-		if ((history.state && history.state.bbb_posts_cache) || !isRandomSearch()) {
-			// New thumbnail container replacement preparation.
-			var childIndex = 0;
+    // Узнаем актуальный размер, чтобы новые заглушки не были мелкими
+    var currentSize = document.body.getAttribute('data-cookie-post-preview-size') ||
+                      document.body.getAttribute('data-current-user-post-preview-size') ||
+                      (location.search.match(/[?&]size=(\d+)/) || [])[1] ||
+                      "180";
 
-			newContainer = thumbContainer.cloneNode(false);
+    // Функция-помощник: если пост уже был отрендерен сайтом в высоком разрешении,
+    // сохраняем оригинальный элемент Danbooru вместо перезаписи его версией 180x180
+    function preserveHiResThumb(thumbElement) {
+        var existing = document.getElementById(thumbElement.id);
+        if (existing) {
+            var existingImg = existing.querySelector('img.post-preview-image');
+            // Если у Danbooru уже загружена картинка не 180 (например 720 или 360), оставляем её
+            if (existingImg && existingImg.src && !existingImg.src.includes('/180x180/')) {
+                return existing;
+            }
+        }
+        // Для скрытых/новых постов вешаем актуальный класс размера
+        thumbElement.classList.remove('post-preview-180');
+        thumbElement.classList.add('post-preview-' + currentSize);
+        return thumbElement;
+    }
 
-			while (thumbContainer.children[childIndex]) {
-				var child = thumbContainer.children[childIndex];
+    if ((history.state && history.state.bbb_posts_cache) || !isRandomSearch()) {
+        // New thumbnail container replacement preparation.
+        var childIndex = 0;
+        newContainer = thumbContainer.cloneNode(false);
 
-				if (child.tagName !== "ARTICLE")
-					newContainer.appendChild(child);
-				else
-					childIndex++;
-			}
+        while (thumbContainer.children[childIndex]) {
+            var child = thumbContainer.children[childIndex];
+            if (child.tagName !== "ARTICLE")
+                newContainer.appendChild(child);
+            else
+                childIndex++;
+        }
 
-			if (!before)
-				newContainer.appendChild(thumbs);
-			else
-				newContainer.insertBefore(thumbs, before);
+        // Бережно вставляем карточки, не ломая те, что Danbooru уже сделал четкими
+        var thumbsArr = getPosts(thumbs);
+        var finalFrag = document.createDocumentFragment();
+        for (var t = 0; t < thumbsArr.length; t++) {
+            finalFrag.appendChild(preserveHiResThumb(thumbsArr[t]));
+        }
 
-			// Prepare thumbnails.
-			prepThumbnails(newContainer);
+        if (!before)
+            newContainer.appendChild(finalFrag);
+        else
+            newContainer.insertBefore(finalFrag, before);
 
-			// Replace results with new results.
-			thumbContainer.parentNode.replaceChild(newContainer, thumbContainer);
-		}
-		else {
-			// Fill out a random search by appending thumbnails.
-			var origThumbs = getPosts(thumbs);
-			var i, il, curThumb; // Loop variables.
+        // Prepare thumbnails.
+        prepThumbnails(newContainer);
 
-			newContainer = document.createDocumentFragment();
+        // Replace results with new results.
+        thumbContainer.parentNode.replaceChild(newContainer, thumbContainer);
+    }
+    else {
+        // Fill out a random search by appending thumbnails.
+        var origThumbs = getPosts(thumbs);
+        var i, il, curThumb; // Loop variables.
+        newContainer = document.createDocumentFragment();
 
-			// Remove existing posts.
-			for (i = 0, il = origThumbs.length; i < il; i++) {
-				curThumb = origThumbs[i];
+        // Remove existing posts.
+        for (i = 0, il = origThumbs.length; i < il; i++) {
+            curThumb = origThumbs[i];
+            if (getId(curThumb.id))
+                thumbs.removeChild(curThumb);
+        }
 
-				if (getId(curThumb.id))
-					thumbs.removeChild(curThumb);
-			}
+        // Favor hidden posts since they're the most likely reason for the API request.
+        var noDupThumbs = getPosts(thumbs);
+        var hiddenSearch = createSearch("~loli ~shota ~toddlercon ~status:deleted ~status:banned");
+        var limit = getLimit() || (allowUserLimit() ? thumbnail_count : thumbnail_count_default);
+        var numMissing = limit - getPosts().length;
 
-			// Favor hidden posts since they're the most likely reason for the API request.
-			var noDupThumbs = getPosts(thumbs);
-			var hiddenSearch = createSearch("~loli ~shota ~toddlercon ~status:deleted ~status:banned");
-			var limit = getLimit() || (allowUserLimit() ? thumbnail_count : thumbnail_count_default);
-			var numMissing = limit - getPosts().length;
+        for (i = 0, il = noDupThumbs.length; i < il; i++) {
+            curThumb = noDupThumbs[i];
+            if (numMissing === 0)
+                break;
+            else if (thumbSearchMatch(curThumb, hiddenSearch)) {
+                newContainer.appendChild(preserveHiResThumb(curThumb));
+                numMissing--;
+            }
+        }
 
-			for (i = 0, il = noDupThumbs.length; i < il; i++) {
-				curThumb = noDupThumbs[i];
+        // Try to fix any shortage of thumbnails.
+        var leftoverThumbs = getPosts(thumbs);
+        for (i = 0, il = leftoverThumbs.length; i < il; i++) {
+            if (numMissing === 0)
+                break;
+            else {
+                newContainer.appendChild(preserveHiResThumb(leftoverThumbs[i]));
+                numMissing--;
+            }
+        }
 
-				if (numMissing === 0)
-					break;
-				else if (thumbSearchMatch(curThumb, hiddenSearch)) {
-					newContainer.appendChild(curThumb);
-					numMissing--;
-				}
-			}
+        // Prepare thumbnails.
+        prepThumbnails(newContainer);
 
-			// Try to fix any shortage of thumbnails.
-			var leftoverThumbs = getPosts(thumbs);
+        // Append listing with new thumbnails.
+        if (!before)
+            thumbContainer.appendChild(newContainer);
+        else
+            thumbContainer.insertBefore(newContainer, before);
+    }
+}
 
-			for (i = 0, il = leftoverThumbs.length; i < il; i++) {
-				if (numMissing === 0)
-					break;
-				else {
-					newContainer.appendChild(leftoverThumbs[i]);
-					numMissing--;
-				}
-			}
-
-			// Prepare thumbnails.
-			prepThumbnails(newContainer);
-
-			// Append listing with new thumbnails.
-			if (!before)
-				thumbContainer.appendChild(newContainer);
-			else
-				thumbContainer.insertBefore(newContainer, before);
-		}
-	}
 
 	function getIdCache() {
 		// Retrieve the cached list of post IDs used for the pool/favorite group thumbnails.
@@ -6241,7 +6267,6 @@ function bbbScript() { // Wrapper for injecting the script into the document.
 
 		var allowAPI = useAPI();
 		var stateCache = (history.state || {}).bbb_posts_cache;
-
 		if (gLoc === "post")
 			delayMe(parsePost); // Delay is needed to force the script to pause and allow Danbooru to do whatever. It essentially mimics the async nature of the API call.
 		else if (gLoc === "comment_search" || gLoc === "comment")
@@ -7656,6 +7681,42 @@ function bbbScript() { // Wrapper for injecting the script into the document.
 		'#bbb-dialog-window .bbb-dialog-button-div {padding-top: 10px; flex-grow: 0; flex-shrink: 0; overflow: hidden;}' +
 		'#bbb-dialog-window .bbb-edit-area {height: 300px; width: 800px;}' +
 		'.ui-autocomplete {z-index: 9004 !important;}';
+        styles += `
+article.post-preview {
+    aspect-ratio: 1 / 1 !important;
+    overflow: hidden !important;
+    position: relative !important;
+}
+
+/* 2. Контейнеры занимают 100% ячейки */
+article.post-preview .post-preview-container,
+article.post-preview a.post-preview-link,
+article.post-preview a.bbb-thumb-link,
+article.post-preview picture {
+    display: flex !important;
+    width: 100% !important;
+    height: 100% !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+}
+
+/* 3. Картинка занимает весь контейнер; object-fit: contain сохраняет пропорции артов */
+article.post-preview img.post-preview-image {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    object-fit: contain !important;
+}
+
+/* 4. Заглушки без арта заполняют фон на 100% */
+article.post-preview img[src*="data:image"],
+article.post-preview.blacklisted-active a.bbb-thumb-link {
+    width: 100% !important;
+    height: 100% !important;
+}
+`;
 
 		// Provide a little extra space for listings that allow thumbnail_count.
 		if (thumbnail_count && (gLoc === "search" || gLoc === "favorites")) {
@@ -7678,8 +7739,8 @@ function bbbScript() { // Wrapper for injecting the script into the document.
 		var sbsl = status_borders.length;
 		var statusBorderItem; // Loop variable.
 
-		styles += 'article.post-preview a.bbb-thumb-link, .post-preview div.preview a.bbb-thumb-link {display: inline-block !important;}' +
-		'article.post-preview {height: ' + thumbMaxHeight + 'px !important; width: ' + thumbMaxWidth + 'px !important; margin: 0px ' + listingExtraSpace + 'px ' + listingExtraSpace + 'px 0px !important;}' +
+        styles += 'article.post-preview a.bbb-thumb-link, .post-preview div.preview a.bbb-thumb-link {display: inline-block !important; width: 100% !important; height: 100% !important;}' +
+        'article.post-preview {margin: 0px ' + listingExtraSpace + 'px ' + listingExtraSpace + 'px 0px !important;}' + listingExtraSpace + 'px ' + listingExtraSpace + 'px 0px !important;}' +
 		'article.post-preview.pooled {height: ' + (thumbMaxHeight + 60) + 'px !important;}' + // Pool gallery view thumb height adjustment.
 		'#has-parent-relationship-preview article.post-preview, #has-children-relationship-preview article.post-preview {padding: 5px 5px 10px !important; width: auto !important; max-width: ' + thumbMaxWidth + 'px !important; margin: 0px !important;}' +
 		'article.post-preview a.bbb-thumb-link {line-height: 0px !important;}' +
@@ -10517,6 +10578,11 @@ function bbbInit() {
 }
 
 async function fixHiddenGoldPages() {
+        // ЖЕСТКАЯ ЗАЩИТА: Запускаемся ТОЛЬКО в общем поиске/каталоге!
+    // Если в URL есть ID поста (/posts/12345), немедленно выходим:
+    if (location.pathname.match(/^\/posts\/\d+/)) {
+        return;
+    }
     // 1. Ищем РОДНОЙ контейнер для постов, который Danbooru оставил пустым
     let galleryContainer = document.querySelector('.posts-container') ||
                            document.querySelector('#posts-container') ||
