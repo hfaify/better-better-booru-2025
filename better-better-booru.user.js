@@ -10569,11 +10569,16 @@ function bbbInit() {
 	}
 
 	// Inject the script.
-	var script = document.createElement('script');
+	var nonce = document.querySelector('meta[name="csp-nonce"]')?.content || 
+            document.querySelector('script[nonce]')?.nonce;
+
+	var script = document.createElement("script");
 	script.type = "text/javascript";
-	script.appendChild(document.createTextNode('window.bbbGMFunc = ' + bbbGMFunc + '; ' + bbbScript + '(' + runBBBScript + ')();'));
-	document.body.appendChild(script);
-	window.setTimeout(function() { document.body.removeChild(script); }, 0);
+	if (nonce) {
+	    script.setAttribute("nonce", nonce);
+				}
+	script.textContent = "(" + bbbScript.toString() + ")();";
+	(document.head || document.documentElement).appendChild(script);
 
 }
 
