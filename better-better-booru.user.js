@@ -10656,7 +10656,6 @@ async function fixHiddenGoldPages() {
         			limit = parseInt(parsed.thumbnail_count) || parseInt(parsed.thumbnail_count_default) || limit;
    	 							}
 							}	
-            }
             // 2. Если не нашли, проверяем стандартный LocalStorage браузера
             if (limit === 20 && window.localStorage) {
                 const localConfig = window.localStorage.getItem('bbb_settings') || window.localStorage.getItem('bbb_config');
@@ -10665,7 +10664,6 @@ async function fixHiddenGoldPages() {
                     limit = parseInt(parsed.thumbnail_count) || parseInt(parsed.thumbnail_count_default) || limit;
                 }
             }
-
             // 3. Если в конфиге было "Disabled:0", ставим безопасный fallback на 100 или 200
             if (limit <= 0 || isNaN(limit)) {
                 limit = 200;
