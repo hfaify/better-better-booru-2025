@@ -3,7 +3,7 @@
 // @namespace      https://greasyfork.org/scripts/3575-better-better-booru
 // @author         otani, modified by Jawertae, fixed by Hfaify.
 // @description    Several changes to make Danbooru much better.
-// @version        8.6
+// @version        8.7
 // @updateURL      https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @downloadURL    https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @match          *://*.donmai.us/*
@@ -12,6 +12,11 @@
 // @connect        pixiv.re
 // @connect        i.pximg.net
 // @connect        i.pixiv.re
+// @connect        pbs.twimg.com
+// @connect        video.twimg.com
+// @connect        api.fxtwitter.com
+// @connect        fxtwitter.com
+// @connect        *
 // @run-at         document-end
 // @grant          GM_xmlhttpRequest
 // @grant          GM.xmlHttpRequest
@@ -8071,19 +8076,18 @@ article.post-preview.blacklisted-active a.bbb-thumb-link {
 
 	function pageCounter() {
 		// Set up the page counter.
+		// Set up the page counter.
 		var pageDiv = document.getElementById("page");
 		var paginator = getPaginator();
-        var pageLinks = paginator.querySelectorAll('.paginator-page');
 
-		if (!page_counter)
-        {console.log('No page_counter');
-            return;}
-        else if (!paginator) {console.log('No paginator');
-            return;}
-        else if (!pageDiv) {console.log('No pageDiv');
-            return;}
-        else if (!pageLinks) {console.log('No pageLinks');
-            return;}
+		if (!page_counter || !paginator || !pageDiv) {
+			return;
+		}
+
+		var pageLinks = paginator.querySelectorAll('.paginator-page');
+		if (!pageLinks || !pageLinks.length) {
+			return;
+		}
 
 		var numString = "";
 		var lastNumString; // If/else variable.
@@ -10696,7 +10700,7 @@ async function fixHiddenGoldPages() {
             // 1. ПРАВИЛЬНО ОБЪЯВЛЯЕМ ПЕРЕМЕННЫЕ ИЗ JSON
             const pixivId = postJson.pixiv_id || postJson.media_asset?.pixiv_id || '';
             const fileExt = postJson.file_ext || 'jpg';
-            const sourceUrl = postJson.source || '';
+            const sourceUrl = postJson.source || postJson.normalized_source || '';
 
             let statusClass = '';
             if (postJson.is_deleted) statusClass = ' post-status-deleted';
@@ -10754,70 +10758,324 @@ fixHiddenGoldPages();
 
 bbbInit();
 
-function loadBypassCSPImage(proxyUrl, imgElement, originalSource = '') {
+// Кэш ответов FxTwitter на время жизни вкладки, чтобы не дергать API дважды для сиблингов одного твита
+const fxTweetCache = new Map();
+
+function loadTwitterPostImage(sourceUrl, imgElement) {
+    const gmXhr = (typeof GM_xmlhttpRequest === 'function') ? GM_xmlhttpRequest :
+                  (typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function') ? GM.xmlHttpRequest : null;
+    if (!gmXhr) return;
+
+    // СЛУЧАЙ А: Прямая ссылка на CDN pbs.twimg.com
+    if (sourceUrl.indexOf('pbs.twimg.com/media/') > -1) {
+        let fastThumbUrl = sourceUrl
+            .replace(/:(orig|large)$/i, '')
+            .replace(/([?&]name=)(orig|large|4096x4096)/i, '$1medium');
+        if (fastThumbUrl.indexOf('name=') === -1) {
+            fastThumbUrl += (fastThumbUrl.indexOf('?') > -1 ? '&' : '?') + 'name=medium';
+        }
+        loadBypassCSPImage(fastThumbUrl, imgElement, '');
+        return;
+    }
+
+    // СЛУЧАЙ Б: Ссылка на пост x.com / twitter.com
+    const tweetMatch = sourceUrl.match(/(?:twitter\.com|x\.com)\/([^/]+)\/status\/(\d+)(?:\/photo\/(\d+))?/i);
+    if (!tweetMatch) return;
+
+    const screenName = tweetMatch.at(1) || 'i';
+    const tweetId = tweetMatch.at(2);
+    const photoRaw = tweetMatch.at(3);
+    const photoIndex = photoRaw ? Math.max(0, parseInt(photoRaw, 10) - 1) : 0;
+
+    function applyMediaFromTweet(tweetData) {
+        if (!tweetData || !tweetData.media) {
+            console.warn('[BBB-2025] В ответе FxTwitter нет медиа для твита:', tweetId, tweetData);
+            return;
+        }
+
+        // Универсальное извлечение массива медиа и для API v2, и для API v1
+        let allMedia = [];
+        if (Array.isArray(tweetData.media)) {
+            allMedia = tweetData.media;
+        } else if (tweetData.media.all && Array.isArray(tweetData.media.all)) {
+            allMedia = tweetData.media.all;
+        } else if (tweetData.media.photos && Array.isArray(tweetData.media.photos)) {
+            allMedia = tweetData.media.photos;
+        } else if (tweetData.media.videos && Array.isArray(tweetData.media.videos)) {
+            allMedia = tweetData.media.videos;
+        }
+
+        if (!allMedia.length) return;
+
+        // Используем .at(), чтобы чат не съел квадратные скобки индекса!
+        const targetMedia = allMedia.at(photoIndex) || allMedia.at(0);
+        if (!targetMedia) return;
+
+        let mediaUrl = (targetMedia.type === 'photo')
+            ? targetMedia.url
+            : (targetMedia.thumbnail_url || targetMedia.poster || targetMedia.url);
+
+        if (mediaUrl && mediaUrl.indexOf('pbs.twimg.com') > -1) {
+            mediaUrl = mediaUrl.replace(/([?&]name=)(orig|large)/i, '$1medium');
+            if (mediaUrl.indexOf('name=') === -1) {
+                mediaUrl += (mediaUrl.indexOf('?') > -1 ? '&' : '?') + 'name=medium';
+            }
+        }
+
+        if (mediaUrl) {
+            loadBypassCSPImage(mediaUrl, imgElement, '');
+        }
+    }
+
+    if (fxTweetCache.has(tweetId)) {
+        applyMediaFromTweet(fxTweetCache.get(tweetId));
+        return;
+    }
+
+    // Пробуем сначала стабильный v1 с ником автора (он гарантированно отдает media.all), а если нет — v2
+    const apiV1 = ['https:', '', 'api.fxtwitter.com', screenName, 'status', tweetId].join('/');
+
+    gmXhr({
+        method: 'GET',
+        url: apiV1,
+        headers: { 'Accept': 'application/json' },
+        onload: function(res) {
+            if (res.status >= 200 && res.status < 300 && res.responseText) {
+                try {
+                    const data = JSON.parse(res.responseText);
+                    const tweetObj = data.tweet || data.status;
+                    if (tweetObj) {
+                        fxTweetCache.set(tweetId, tweetObj);
+                        applyMediaFromTweet(tweetObj);
+                    } else {
+                        console.warn('[BBB-2025] Твит не найден или удален:', tweetId, data);
+                    }
+                } catch (e) {
+                    console.warn('[BBB-2025] Ошибка JSON FxTwitter:', e);
+                }
+            } else {
+                console.warn('[BBB-2025] FxTwitter вернул статус:', res.status, apiV1);
+            }
+        },
+        onerror: function(err) {
+            console.error('[BBB-2025] Сетевая ошибка при запросе к api.fxtwitter.com:', err);
+        }
+    });
+}
+
+const socialPostCache = new Map();
+
+function loadOtherSourcesImage(sourceUrl, normSource, imgElement) {
+    const gmXhr = (typeof GM_xmlhttpRequest === 'function') ? GM_xmlhttpRequest :
+                  (typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function') ? GM.xmlHttpRequest : null;
+    if (!gmXhr) return;
+
+    const candidates = [sourceUrl, normSource].filter(Boolean);
+    const primaryUrl = candidates.at(0) || '';
+    if (!primaryUrl) return;
+
+    // 0. Игнорируем заведомо мертвые или закрытые пейволлом страницы (если это не прямая картинка)
+    const cleanCheck = primaryUrl.split('?').shift().split('#').shift();
+    const isDirectMedia = /\.(jpe?g|png|gif|webp|avif|mp4|webm)(?::[a-z0-9]+)?$/i.test(cleanCheck) ||
+                          primaryUrl.indexOf('://misskeyusercontent.com') > -1 ||
+                          primaryUrl.indexOf('cdn.bsky.app') > -1;
+
+    // Если среди source / normSource УЖЕ есть прямая ссылка на файл — качаем мгновенно без API!
+    const directHit = candidates.find(u => {
+        const c = u.split('?').shift().split('#').shift();
+        return /\.(jpe?g|png|gif|webp|avif|mp4|webm)(?::[a-z0-9]+)?$/i.test(c) ||
+               u.indexOf('://misskeyusercontent.com') > -1 ||
+               u.indexOf('img.pawoo.net') > -1 ||
+               u.indexOf('cdn.bsky.app') > -1;
+    });
+
+    if (directHit && directHit.indexOf('4cdn.org') === -1 && directHit.indexOf('discordapp.com') === -1) {
+        // На случай старого Tumblr страницы поста — пропускаем дальше, а медиа-CDN качаем сразу
+        loadBypassCSPImage(directHit, imgElement, '');
+        return;
+    }
+
+    const anyUrl = candidates.join(' ');
+
+    // 1. BLUESKY (bsky.app/profile/{actor}/post/{rkey})
+    const bskyMatch = anyUrl.match(/bsky\.app\/profile\/([^/\s]+)\/post\/([a-z0-9]+)/i);
+    if (bskyMatch) {
+        const actor = bskyMatch.at(1);
+        const rkey = bskyMatch.at(2);
+        const cacheKey = 'bsky:' + actor + ':' + rkey;
+
+        if (socialPostCache.has(cacheKey)) {
+            const cachedUrl = socialPostCache.get(cacheKey);
+            if (cachedUrl) loadBypassCSPImage(cachedUrl, imgElement, '');
+            return;
+        }
+
+        const atUri = encodeURIComponent(['at:', '', actor, 'app.bsky.feed.post', rkey].join('/'));
+        const apiUrl = ['https:', '', 'public.api.bsky.app', 'xrpc', 'app.bsky.feed.getPostThread?depth=0&uri='].join('/') + atUri;
+
+        gmXhr({
+            method: 'GET',
+            url: apiUrl,
+            headers: { 'Accept': 'application/json' },
+            onload: function(res) {
+                if (res.status >= 200 && res.status < 300 && res.responseText) {
+                    try {
+                        const data = JSON.parse(res.responseText);
+                        const embed = data?.thread?.post?.embed;
+                        const mediaObj = embed?.media || embed;
+                        let thumb = '';
+                        if (mediaObj?.images && mediaObj.images.length) {
+                            thumb = mediaObj.images.at(0).thumb || mediaObj.images.at(0).fullsize;
+                        } else if (mediaObj?.thumbnail) {
+                            thumb = mediaObj.thumbnail;
+                        }
+                        socialPostCache.set(cacheKey, thumb || '');
+                        if (thumb) loadBypassCSPImage(thumb, imgElement, '');
+                    } catch (e) {}
+                }
+            }
+        });
+        return;
+    }
+
+    // 2. PAWOO / MASTODON (pawoo.net/@user/12345 или pawoo.net/web/statuses/12345)
+    const pawooMatch = anyUrl.match(/pawoo\.net\/(?:@[^/\s]+\/|users\/[^/\s]+\/statuses\/|web\/statuses\/)(\d+)/i);
+    if (pawooMatch) {
+        const statusId = pawooMatch.at(1);
+        const cacheKey = 'pawoo:' + statusId;
+
+        if (socialPostCache.has(cacheKey)) {
+            const cachedUrl = socialPostCache.get(cacheKey);
+            if (cachedUrl) loadBypassCSPImage(cachedUrl, imgElement, '');
+            return;
+        }
+
+        const apiUrl = ['https:', '', 'pawoo.net', 'api', 'v1', 'statuses', statusId].join('/');
+        gmXhr({
+            method: 'GET',
+            url: apiUrl,
+            headers: { 'Accept': 'application/json' },
+            onload: function(res) {
+                if (res.status >= 200 && res.status < 300 && res.responseText) {
+                    try {
+                        const data = JSON.parse(res.responseText);
+                        const att = (data.media_attachments || []).at(0);
+                        const thumb = att ? (att.preview_url || att.url) : '';
+                        socialPostCache.set(cacheKey, thumb || '');
+                        if (thumb) loadBypassCSPImage(thumb, imgElement, '');
+                    } catch (e) {}
+                }
+            }
+        });
+        return;
+    }
+
+    // 3. MISSKEY.IO (misskey.io/notes/{noteId})
+    const misskeyMatch = anyUrl.match(/misskey\.io\/notes\/([a-z0-9]+)/i);
+    if (misskeyMatch) {
+        const noteId = misskeyMatch.at(1);
+        const cacheKey = 'misskey:' + noteId;
+
+        if (socialPostCache.has(cacheKey)) {
+            const cachedUrl = socialPostCache.get(cacheKey);
+            if (cachedUrl) loadBypassCSPImage(cachedUrl, imgElement, '');
+            return;
+        }
+
+        const apiUrl = ['https:', '', 'misskey.io', 'api', 'notes', 'show'].join('/');
+        gmXhr({
+            method: 'POST',
+            url: apiUrl,
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            data: JSON.stringify({ noteId: noteId }),
+            onload: function(res) {
+                if (res.status >= 200 && res.status < 300 && res.responseText) {
+                    try {
+                        const data = JSON.parse(res.responseText);
+                        const fileObj = (data.files || []).at(0);
+                        const thumb = fileObj ? (fileObj.thumbnailUrl || fileObj.url) : '';
+                        socialPostCache.set(cacheKey, thumb || '');
+                        if (thumb) loadBypassCSPImage(thumb, imgElement, '');
+                    } catch (e) {}
+                }
+            }
+        });
+    }
+}
+
+function loadBypassCSPImage(proxyUrl, imgElement, originalSource) {
     const gmXhr = (typeof GM_xmlhttpRequest === 'function') ? GM_xmlhttpRequest :
                   (typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function') ? GM.xmlHttpRequest : null;
 
     if (!gmXhr) return;
 
-    // Отрезаем ?original и прочие query-параметры для точной проверки расширения
-    const cleanSource = (originalSource || '').split('?')[0];
-    const cleanProxy = (proxyUrl || '').split('?')[0];
+    const cleanSource = String(originalSource || '').split('?').shift();
+    const cleanProxy = String(proxyUrl || '').split('?').shift();
 
-    const isUgoiraOrVideo = /\.(zip|webm|mp4)$/i.test(cleanSource) ||
-                            /\.(zip|webm|mp4)$/i.test(cleanProxy) ||
-                            cleanSource.includes('img-zip-ugoira');
+    const isPixivUrl = cleanProxy.indexOf('pixiv.') > -1 || cleanSource.indexOf('pximg.net') > -1;
+    const isUgoiraOrVideo = isPixivUrl && (
+        /\.(zip|webm|mp4)$/i.test(cleanSource) ||
+        /\.(zip|webm|mp4)$/i.test(cleanProxy) ||
+        cleanSource.indexOf('img-zip-ugoira') > -1
+    );
 
-    // Формируем очередь ссылок (если первая даст 404 — скрипт сам попробует следующую)
     const urlsToTry = [];
 
     if (isUgoiraOrVideo) {
-        // 1. Прямая трансформация ссылки Ugoira на сервере Pixiv в обложку первого кадра:
-        // .../img-zip-ugoira/img/.../ID-HASH_ugoira1920x1080.zip -> .../img-master/img/.../ID-HASH_master1200.jpg
-        if (cleanSource.includes('img-zip-ugoira')) {
+        if (cleanSource.indexOf('img-zip-ugoira') > -1) {
             urlsToTry.push(
                 cleanSource
                     .replace('/img-zip-ugoira/', '/img-master/')
                     .replace(/_ugoira\d+x\d+\.zip$/i, '_master1200.jpg')
             );
-            // На случай старого формата именования обложек с _p0:
             urlsToTry.push(
                 cleanSource
                     .replace('/img-zip-ugoira/', '/img-master/')
                     .replace(/_ugoira\d+x\d+\.zip$/i, '_p0_master1200.jpg')
             );
         }
-        // 2. Запасной вариант через зеркало i.pixiv.re
         const baseRe = cleanProxy.replace('pixiv.cat', 'i.pixiv.re').replace(/\.(zip|webm|mp4)$/i, '');
-        urlsToTry.push(`${baseRe}.jpg`, `${baseRe}.png`);
-    } else if (cleanSource.includes('i.pximg.net')) {
-        // Обычная картинка или GIF напрямую с Pixiv (тоже без лишнего ?original, либо исходная)
+        urlsToTry.push(baseRe + '.jpg', baseRe + '.png');
+    } else if (cleanSource.indexOf('i.pximg.net') > -1) {
         urlsToTry.push(cleanSource);
-        urlsToTry.push( cleanProxy.replace('pixiv.cat', 'i.pixiv.re') );
+        urlsToTry.push(cleanProxy.replace('pixiv.cat', 'i.pixiv.re'));
+    } else if (isPixivUrl) {
+        urlsToTry.push(cleanProxy.replace('pixiv.cat', 'i.pixiv.re'));
     } else {
-        urlsToTry.push( cleanProxy.replace('pixiv.cat', 'i.pixiv.re') );
+        // Любая сторонняя прямая ссылка (X, Bluesky, Pawoo, Misskey, Tumblr, Blogspot, Weibo и др.)
+        urlsToTry.push(proxyUrl);
     }
 
-    // Рекурсивная попытка загрузки по очереди до первой рабочей ссылки
     function tryFetch(index) {
         if (index >= urlsToTry.length) return;
-        const targetUrl = urlsToTry[index];
+        const targetUrl = urlsToTry.at(index);
+
+        const reqHeaders = {
+            'Accept': 'image/avif,image/webp,image/apng,image/gif,image/*,video/*,*/*;q=0.8'
+        };
+
+        // Умный подбор Referer под конкретный хостинг
+        if (targetUrl.indexOf('pximg.net') > -1 || targetUrl.indexOf('pixiv') > -1) {
+            reqHeaders['Referer'] = ['https:', '', 'www.pixiv.net', ''].join('/');
+        } else if (targetUrl.indexOf('sinaimg.cn') > -1) {
+            reqHeaders['Referer'] = ['https:', '', 'weibo.com', ''].join('/');
+        } else if (targetUrl.indexOf('twimg.com') === -1 && targetUrl.indexOf('bsky.app') === -1) {
+            try {
+                reqHeaders['Referer'] = new URL(targetUrl).origin + '/';
+            } catch (e) {}
+        }
 
         gmXhr({
             method: 'GET',
             url: targetUrl,
-            headers: {
-                'Referer': 'https://pixiv.net',
-                'Accept': 'image/avif,image/webp,image/apng,image/gif,image/*,video/*,*/*;q=0.8'
-            },
+            headers: reqHeaders,
             responseType: 'blob',
             onload: function(response) {
                 if (response.status >= 200 && response.status < 300 && response.response) {
                     const blob = response.response;
                     const mime = blob.type || '';
 
-                    // Если пришел HTML или архив вместо картинки — пробуем следующий URL из списка
-                    if (blob.size < 1000 || mime.includes('html') || mime.includes('zip')) {
+                    if (blob.size < 1000 || mime.indexOf('html') > -1 || mime.indexOf('zip') > -1) {
                         tryFetch(index + 1);
                         return;
                     }
@@ -10825,7 +11083,7 @@ function loadBypassCSPImage(proxyUrl, imgElement, originalSource = '') {
                     const reader = new FileReader();
                     reader.onloadend = function() {
                         if (!reader.result) return;
-                        if (mime.startsWith('video/')) {
+                        if (mime.indexOf('video/') === 0) {
                             const video = document.createElement('video');
                             video.src = reader.result;
                             video.className = imgElement.className;
@@ -10841,7 +11099,6 @@ function loadBypassCSPImage(proxyUrl, imgElement, originalSource = '') {
                     };
                     reader.readAsDataURL(blob);
                 } else {
-                    // Ошибка 404/403 — молча переключаемся на запасной вариант
                     tryFetch(index + 1);
                 }
             },
@@ -10853,6 +11110,8 @@ function loadBypassCSPImage(proxyUrl, imgElement, originalSource = '') {
 
     tryFetch(0);
 }
+
+
 
 // Основная функция для обработки постов
 async function processAndFixPosts() {
@@ -10872,76 +11131,359 @@ async function processAndFixPosts() {
         }
         post.classList.add('post-preview-fit-compact', 'post-preview-180', 'blacklist-initialized');
 
-// --- 2. Обход Gold-аккаунта через Pixiv-Proxy ---
-const pixivId = post.getAttribute('data-pixiv-id');
-const fileExt = post.getAttribute('data-file-ext') || 'jpg';
+        // --- 2. Обход Gold-аккаунта (Все источники) ---
+        const pixivId = post.getAttribute('data-pixiv-id');
+        const fileExt = post.getAttribute('data-file-ext') || 'jpg';
+        const sourceUrl = post.getAttribute('data-source') || '';
+        const normSource = post.getAttribute('data-normalized-source') || '';
+        const anyTwitterUrl = [sourceUrl, normSource].find(u =>
+            u.indexOf('://twimg.com') > -1 || u.indexOf('://x.com') > -1 || u.indexOf('://twitter.com') > -1
+        );
 
-if (pixivId && pixivId !== "") {
-    // 1. Сначала проверяем, является ли этот пост заблокированным (имеет ли он заглушку)
-    const sourceElements = post.querySelectorAll('picture source, picture img');
-    let isGoldPlaceholder = false;
+        if ((pixivId && pixivId !== "") || sourceUrl || normSource) {
+            const sourceElements = post.querySelectorAll('picture source, picture img');
+            let isGoldPlaceholder = false;
 
-    for (let element of sourceElements) {
-        const srcset = element.getAttribute('srcset') || element.getAttribute('src') || '';
-        if (srcset.includes('data:image/png;base64')) {
-            isGoldPlaceholder = true;
-            break; // Нашли заглушку, дальше можно не искать
-        }
-    }
+            for (let element of sourceElements) {
+                const srcset = element.getAttribute('srcset') || element.getAttribute('src') || '';
+                if (srcset.indexOf('data:image/png;base64') > -1) {
+                    isGoldPlaceholder = true;
+                    break;
+                }
+            }
 
-    // 2. Активируем тяжелую артиллерию ТОЛЬКО для постов с заглушками
-   if (isGoldPlaceholder) {
-    let proxyUrl = `https://pixiv.cat/${pixivId}.${fileExt}`;
+            if (isGoldPlaceholder) {
+                const pictureElement = post.querySelector('picture');
+                const thumbLink = post.querySelector('.bbb-thumb-link') || post.querySelector('a');
 
-    // Безопасно вытаскиваем оригинальный source-URL поста из HTML-атрибутов
-    const sourceUrl = post.getAttribute('data-source') || '';
+                if (pictureElement && thumbLink) {
+                    const newImg = document.createElement('img');
+                    newImg.className = 'post-preview-image';
+                    newImg.style.maxWidth = '100%';
+                    newImg.style.height = 'auto';
+                    newImg.style.objectFit = 'contain';
 
-    if (sourceUrl.includes('pixiv.net') || sourceUrl.includes('pximg.net')) {
-        const pageMatch = sourceUrl.match(/_p(\d+)/) || sourceUrl.match(/page=(\d+)/);
+                    const oldImg = pictureElement.querySelector('img');
+                    const fallbackSrc = pictureElement.querySelector('source')?.getAttribute('srcset') || (oldImg ? oldImg.src : '');
+                    if (fallbackSrc) newImg.src = fallbackSrc;
 
-        if (pageMatch) {
-            // pageMatch[1] гарантированно вытащит цифру из скобок
-            const pageIndex = parseInt(pageMatch[1]) + 1;
+                    if (oldImg) {
+                        newImg.alt = oldImg.alt || '';
+                        newImg.title = oldImg.title || '';
+                        if (oldImg.hasAttribute('data-title')) {
+                            newImg.setAttribute('data-title', oldImg.getAttribute('data-title'));
+                        }
+                        newImg.setAttribute('aria-expanded', 'false');
+                    }
 
-            if (pageIndex > 1) {
-                proxyUrl = `https://pixiv.cat/${pixivId}-${pageIndex}.${fileExt}`;
+                    pictureElement.remove();
+                    thumbLink.appendChild(newImg);
+
+                    // СТРОГИЙ КАСКАД ПРИОРИТЕТОВ:
+                    // 1. Pixiv (по ID или домену pximg/pixiv)
+                    if ((pixivId && pixivId !== "") || sourceUrl.indexOf('pximg.net') > -1 || sourceUrl.indexOf('pixiv.net') > -1) {
+                        let resolvedPixivId = pixivId;
+                        if (!resolvedPixivId) {
+                            const idMatch = sourceUrl.match(/\/(\d+)(?:-[a-f0-9]+)?(?:_p\d+|_ugoira)/i) || sourceUrl.match(/artworks\/(\d+)/i);
+                            if (idMatch) resolvedPixivId = idMatch.at(1);
+                        }
+                        if (resolvedPixivId) {
+                            let proxyUrl = ['https:', '', 'pixiv.cat', resolvedPixivId + '.' + fileExt].join('/');
+                            const pageMatch = sourceUrl.match(/_p(\d+)/) || sourceUrl.match(/page=(\d+)/);
+                            if (pageMatch) {
+                                const pageIndex = parseInt(pageMatch.at(1), 10) + 1;
+                                if (pageIndex > 1) {
+                                    proxyUrl = ['https:', '', 'pixiv.cat', resolvedPixivId + '-' + pageIndex + '.' + fileExt].join('/');
+                                }
+                            }
+                            loadBypassCSPImage(proxyUrl, newImg, sourceUrl);
+                        }
+                    // 2. X / Twitter
+                    } else if (anyTwitterUrl) {
+                        loadTwitterPostImage(anyTwitterUrl, newImg);
+                    // 3. Bluesky, Pawoo, Misskey + любые прямые ссылки (Tumblr, Blogspot, Weibo, HF и др.)
+                    } else {
+                        loadOtherSourcesImage(sourceUrl, normSource, newImg);
+                    }
+                }
             }
         }
-    }
-
-    const pictureElement = post.querySelector('picture');
-    const thumbLink = post.querySelector('.bbb-thumb-link') || post.querySelector('a');
-
-    if (pictureElement && thumbLink) {
-        const newImg = document.createElement('img');
-        newImg.className = 'post-preview-image';
-
-        newImg.style.maxWidth = '100%';
-        newImg.style.height = 'auto';
-        newImg.style.objectFit = 'contain';
-
-        const oldImg = pictureElement.querySelector('img');
-        const fallbackSrc = pictureElement.querySelector('source')?.getAttribute('srcset') || (oldImg ? oldImg.src : '');
-        if (fallbackSrc) {
-            newImg.src = fallbackSrc; // Держим плашку Hidden, пока качается реальный файл
-        }
-
-        if (oldImg) {
-            newImg.alt = oldImg.alt || '';
-            newImg.title = oldImg.title || '';
-            if (oldImg.hasAttribute('data-title')) {
-                newImg.setAttribute('data-title', oldImg.getAttribute('data-title'));
-            }
-            newImg.setAttribute('aria-expanded', 'false');
-        }
-
-        pictureElement.remove();
-        thumbLink.appendChild(newImg);
-        loadBypassCSPImage(proxyUrl, newImg, sourceUrl);
-    }
-}
-}
     });
+}
+
+// --- ПОИСК ОРИГИНАЛА НА ЗЕРКАЛАХ ДЛЯ СКРЫТЫХ СТРАНИЦ ПОСТОВ (/posts/ID) ---
+function initMirrorSearchUI() {
+    const imgContainer = document.getElementById('image-container');
+    if (imgContainer && (document.getElementById('image') || imgContainer.querySelector('video, canvas'))) {
+        return;
+    }
+
+    const hostEl = imgContainer ||
+                   document.querySelector('.post-notice-hidden, .hidden-posts-notice, #a-show #content') ||
+                   document.getElementById('content');
+    if (!hostEl || document.getElementById('bbb-mirror-panel')) return;
+
+    // Читаем из #image-container, а если его нет — достаём напрямую из сайдбара #post-information!
+    const md5 = (imgContainer && imgContainer.getAttribute('data-md5')) || '';
+    const sidebarSourceLink = document.querySelector('#post-info-source a[href]');
+    const source = (imgContainer && imgContainer.getAttribute('data-source')) || (sidebarSourceLink ? sidebarSourceLink.href : '');
+    const normSource = (imgContainer && imgContainer.getAttribute('data-normalized-source')) || '';
+    const pixivId = (imgContainer && imgContainer.getAttribute('data-pixiv-id')) || '';
+
+    let targetW = Number(imgContainer && imgContainer.getAttribute('data-width')) || 0;
+    let targetH = Number(imgContainer && imgContainer.getAttribute('data-height')) || 0;
+    if (!targetW || !targetH) {
+        const sizeText = (document.getElementById('post-info-size') || {}).textContent || '';
+        const dimMatch = sizeText.match(/(\d+)\s*x\s*(\d+)/i);
+        if (dimMatch) {
+            targetW = Number(dimMatch.at(1));
+            targetH = Number(dimMatch.at(2));
+        }
+    }
+
+    if (!md5 && !source && !normSource && !pixivId) return;
+
+    // 1. Рисуем аккуратную панель в стиле уведомлений Danbooru
+    const panel = document.createElement('div');
+    panel.id = 'bbb-mirror-panel';
+    panel.style.cssText = 'margin: 12px 0; padding: 10px 14px; border: 1px solid #ccc; border-radius: 4px; background: rgba(128,128,128,0.08); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px;';
+
+    const label = document.createElement('strong');
+    label.textContent = 'BBB Mirror Lookup:';
+
+    const select = document.createElement('select');
+    select.style.cssText = 'padding: 3px 6px; border: 1px solid #aaa; border-radius: 3px;';
+    const mirrorOptions = [
+        ['auto', 'Auto (All Mirrors)'],
+        ['e621', 'e621'],
+        ['atf', 'ATF (allthefallen)'],
+        ['yandere', 'Yande.re'],
+        ['gelbooru', 'Gelbooru']
+    ];
+    const savedMirror = localStorage.getItem('bbb_preferred_mirror') || 'auto';
+    mirrorOptions.forEach(pair => {
+        const opt = document.createElement('option');
+        opt.value = pair.at(0);
+        opt.textContent = pair.at(1);
+        if (pair.at(0) === savedMirror) opt.selected = true;
+        select.appendChild(opt);
+    });
+    select.addEventListener('change', () => localStorage.setItem('bbb_preferred_mirror', select.value));
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Search Mirrors';
+    btn.style.cssText = 'padding: 4px 12px; cursor: pointer; border: 1px solid #888; border-radius: 3px; font-weight: bold;';
+
+    const statusSpan = document.createElement('span');
+    statusSpan.style.cssText = 'margin-left: 6px; opacity: 0.85;';
+
+    panel.append(label, select, btn, statusSpan);
+    hostEl.prepend(panel);
+
+    // 2. Формируем поисковый тег (md5 или маска source:*ядро*)
+    function buildSearchToken() {
+        if (md5) return { type: 'md5', val: md5 };
+
+        const raw = normSource || source;
+        // Для X/Twitter берем чисто числовой ID статуса — работает и для x.com, и для twitter.com!
+        const twMatch = raw.match(/(?:x\.com|twitter\.com)\/[^/]+\/status\/(\d+)/i);
+        if (twMatch) return { type: 'source', val: '*status/' + twMatch.at(1) + '*' };
+
+        // Для Pixiv ищем по ID арта
+        if (pixivId) return { type: 'source', val: '*' + pixivId + '*' };
+
+        // Для всех остальных убираем https://, www. и query-хвосты
+        const clean = raw.replace(/^https?:\/\/(www\.)?/i, '').split('?').shift().split('#').shift().replace(/\/+$/, '');
+        return { type: 'source', val: '*' + clean + '*' };
+    }
+
+    // Выбор лучшего поста по совпадению пропорций/размеров (для паков)
+    function pickBestMatch(items, getW, getH) {
+        if (!items || !items.length) return null;
+        if (!targetW || !targetH || items.length === 1) return items.at(0);
+        const exact = items.find(it => Number(getW(it)) === targetW && Number(getH(it)) === targetH);
+        if (exact) return exact;
+        const targetRatio = targetW / targetH;
+        return items.slice().sort((a, b) => {
+            const rA = Math.abs((Number(getW(a)) / (Number(getH(a)) || 1)) - targetRatio);
+            const rB = Math.abs((Number(getW(b)) / (Number(getH(b)) || 1)) - targetRatio);
+            return rA - rB;
+        }).at(0);
+    }
+
+    function gmGet(url, extraHeaders) {
+        const gmXhr = (typeof GM_xmlhttpRequest === 'function') ? GM_xmlhttpRequest :
+                      (typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function') ? GM.xmlHttpRequest : null;
+
+        return new Promise((resolve) => {
+            if (!gmXhr) { resolve(null); return; }
+
+            let settled = false;
+            let reqTask = null;
+
+            const finish = (val) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(hardTimer);
+                resolve(val);
+            };
+
+            // Жесткий JS-таймаут 5 секунд: даже если провайдер глушит пакеты или завис GM, идем к следующему зеркалу!
+            const hardTimer = setTimeout(() => {
+                console.warn('[BBB-2025] Таймаут зеркала (5 сек):', url);
+                try { if (reqTask && typeof reqTask.abort === 'function') reqTask.abort(); } catch (e) {}
+                finish(null);
+            }, 5000);
+
+            try {
+                reqTask = gmXhr({
+                    method: 'GET',
+                    url: url,
+                    timeout: 5000,
+                    headers: Object.assign({
+                        'Accept': 'application/json, text/html, */*'
+                    }, extraHeaders || {}),
+                    onload: res => finish(res),
+                    onerror: () => finish(null),
+                    ontimeout: () => finish(null),
+                    onabort: () => finish(null)
+                });
+            } catch (e) {
+                finish(null);
+            }
+        });
+    }
+
+    // 3. Адаптеры под конкретные зеркала
+    async function queryMirror(mirrorId, token) {
+        const qTag = encodeURIComponent(token.type + ':' + token.val);
+
+        if (mirrorId === 'e621') {
+            const url = ['https:', '', 'e621.net', 'posts.json?limit=10&tags='].join('/') + qTag;
+            const res = await gmGet(url);
+            if (!res || res.status !== 200) return null;
+            const data = JSON.parse(res.responseText);
+            const hit = pickBestMatch(data.posts || [], p => p.file && p.file.width, p => p.file && p.file.height);
+            if (hit && hit.file && hit.file.url) {
+                return {
+                    fileUrl: hit.file.url,
+                    postUrl: ['https:', '', 'e621.net', 'posts', hit.id].join('/'),
+                    name: 'e621'
+                };
+            }
+        }
+
+        if (mirrorId === 'atf') {
+            const url = ['https:', '', 'booru.allthefallen.moe', 'posts.json?limit=10&tags='].join('/') + qTag;
+            const res = await gmGet(url);
+            if (!res || res.status !== 200) return null;
+            const list = JSON.parse(res.responseText);
+            const valid = Array.isArray(list) ? list.filter(p => p.file_url || p.large_file_url) : [];
+            const hit = pickBestMatch(valid, p => p.image_width, p => p.image_height);
+            if (hit) {
+                return {
+                    fileUrl: hit.file_url || hit.large_file_url,
+                    postUrl: ['https:', '', 'booru.allthefallen.moe', 'posts', hit.id].join('/'),
+                    name: 'ATF'
+                };
+            }
+        }
+
+        if (mirrorId === 'yandere') {
+            const url = ['https:', '', 'yande.re', 'post.json?limit=10&tags='].join('/') + qTag;
+            const res = await gmGet(url);
+            if (!res || res.status !== 200) return null;
+            const list = JSON.parse(res.responseText);
+            const valid = Array.isArray(list) ? list.filter(p => p.file_url) : [];
+            const hit = pickBestMatch(valid, p => p.width, p => p.height);
+            if (hit) {
+                return {
+                    fileUrl: hit.file_url,
+                    postUrl: ['https:', '', 'yande.re', 'post', 'show', hit.id].join('/'),
+                    name: 'Yande.re'
+                };
+            }
+        }
+
+        if (mirrorId === 'gelbooru') {
+            // Обходим закрытый 401 API через легкий парсинг публичного HTML-поиска и страницы поста
+            const listUrl = ['https:', '', 'gelbooru.com', 'index.php?page=post&s=list&tags='].join('/') + qTag;
+            const listRes = await gmGet(listUrl);
+            if (!listRes || listRes.status !== 200) return null;
+            const idMatch = listRes.responseText.match(/id="p(\d+)"/i) || listRes.responseText.match(/s=view&amp;id=(\d+)/i);
+            if (!idMatch) return null;
+
+            const postUrl = ['https:', '', 'gelbooru.com', 'index.php?page=post&s=view&id='].join('/') + idMatch.at(1);
+            const viewRes = await gmGet(postUrl);
+            if (!viewRes || viewRes.status !== 200) return null;
+
+            const origMatch = viewRes.responseText.match(/href="(https?:\/\/[^"]+\/images\/[^"]+)"[^>]*>Original image/i) ||
+                              viewRes.responseText.match(/property="og:image"\s+content="(https?:\/\/[^"]+)"/i);
+            if (origMatch) {
+                return {
+                    fileUrl: origMatch.at(1),
+                    postUrl: postUrl,
+                    name: 'Gelbooru'
+                };
+            }
+        }
+
+        return null;
+    }
+
+    // 4. Обработчик клика по кнопке
+    btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        const token = buildSearchToken();
+        const order = (select.value === 'auto') ? ['e621', 'atf', 'yandere', 'gelbooru'] : [select.value];
+
+        let found = null;
+        for (const m of order) {
+            statusSpan.textContent = 'Checking ' + m.toUpperCase() + '...';
+            try {
+                found = await queryMirror(m, token);
+            } catch (e) {}
+            if (found) break;
+        }
+
+        if (!found) {
+            statusSpan.textContent = 'Not found (Tip: make sure you are logged in to the mirror site in this browser, as guests may see filtered results).';
+            btn.disabled = false;
+            return;
+        }
+
+        statusSpan.innerHTML = 'Found on <a href="' + found.postUrl + '" target="_blank" rel="noopener" style="text-decoration:underline; font-weight:bold;">' + found.name + '</a>! Loading media...';
+
+        // Создаем элемент для рендера в обход CSP через нашу готовую loadBypassCSPImage!
+        const renderBox = document.createElement('div');
+        renderBox.style.cssText = 'margin-top: 10px;';
+        const fullImg = document.createElement('img');
+        fullImg.id = 'image';
+        fullImg.style.cssText = 'max-width: 100%; height: auto; display: block;';
+        renderBox.appendChild(fullImg);
+        if (imgContainer) {
+            imgContainer.appendChild(renderBox);
+        } else {
+            panel.after(renderBox);
+        }
+        // Если это видео (.mp4 / .webm), наш loadBypassCSPImage сам превратит  в , добавим ему контролы!
+        loadBypassCSPImage(found.fileUrl, fullImg, '');
+        setTimeout(() => {
+            const vid = renderBox.querySelector('video');
+            if (vid) {
+                vid.controls = true;
+                vid.muted = false;
+            }
+            statusSpan.innerHTML = 'Loaded from ' + found.name + '.';
+            btn.disabled = false;
+        }, 1200);
+    });
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initMirrorSearchUI);
+} else {
+    initMirrorSearchUI();
 }
 
 // Настройка MutationObserver для отслеживания новых страниц/постов
