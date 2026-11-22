@@ -1,5 +1,22 @@
 Changelog
 ----------
+* Version 8.7:
+	* Added preview loading support for X/Twitter, Bluesky, Pawoo, and Misskey on hidden Gold-level posts.
+	* Added universal fallback preview loading for hidden posts with direct media URLs on external CDNs (Tumblr, Blogspot, Weibo, etc.).
+	* Added an on-demand "BBB Mirror Lookup" bar on hidden post pages (/posts/:id) to search and load full media from e621, ATF, Yande.re, and Gelbooru (logging in to the respective mirror site is recommended).
+	* Fixed a TypeError crash in the page counter when viewing individual post pages without a paginator.
+	* Added a strict 5-second timeout to mirror lookup requests to prevent unreachable hosts from hanging the queue.
+* Version 8.6:
+	* Fixed script injection and external image loading broken by Danbooru's strict Content Security Policy (script-src and img-src bypass).
+	* Updated Pixiv preview fetching to load directly from i.pximg.net with automatic fallback to i.pixiv.re.
+	* Added first-frame cover preview support for animated Pixiv Ugoira (.zip) posts.
+	* Added asynchronous storage support (GM.getValue / GM.setValue) for Firefox + Greasemonkey 4+ compatibility.
+* Version 8.3 – 8.5:
+	* Restored completely empty Gold-restricted search pages by populating the native post grid via the JSON API.
+	* Added multi-page (sibling/pack) index detection (_p0, _p1, etc.) for hidden Pixiv previews.
+	* Updated thumbnail rendering to preserve high-resolution previews (360x360, 720x720) and respect Danbooru's preview size switcher.
+	* Fixed native colored tag tooltips (data-title) and square grid aspect ratios on custom-generated thumbnails.
+	* Fixed fixHiddenGoldPages accidentally running on individual post pages.
 * Version 8.2.3.6:
   * Fixed 404 account check error for not logged in users (well not actually fix, just message with this error now in console).
 * Version 8.2.3.5:
