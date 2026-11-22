@@ -3,13 +3,18 @@
 // @namespace      https://greasyfork.org/scripts/3575-better-better-booru
 // @author         otani, modified by Jawertae, fixed by Hfaify.
 // @description    Several changes to make Danbooru much better.
-// @version        8.5
+// @version        8.6
 // @updateURL      https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @downloadURL    https://github.com/hfaify/better-better-booru-2025/raw/refs/heads/master/better-better-booru.user.js
 // @match          *://*.donmai.us/*
-// @connect        https://isshiki.donmai.us
+// @connect        isshiki.donmai.us
+// @connect        pixiv.cat
+// @connect        pixiv.re
+// @connect        i.pximg.net
+// @connect        i.pixiv.re
 // @run-at         document-end
 // @grant          GM_xmlhttpRequest
+// @grant          GM.xmlHttpRequest
 // @grant          GM_addStyle
 // @grant          GM_getValue
 // @grant          GM_setValue
@@ -10664,6 +10669,7 @@ async function fixHiddenGoldPages() {
                     limit = parseInt(parsed.thumbnail_count) || parseInt(parsed.thumbnail_count_default) || limit;
                 }
             }
+
             // 3. Если в конфиге было "Disabled:0", ставим безопасный fallback на 100 или 200
             if (limit <= 0 || isNaN(limit)) {
                 limit = 200;
@@ -10697,14 +10703,14 @@ async function fixHiddenGoldPages() {
             if (postJson.is_pending) statusClass = ' post-status-pending';
 
             // 2. РАССЧИТЫВАЕМ ИНДЕКС СТРАНИЦЫ ДЛЯ СИБЛИНГОВ (ПАКОВ)
-            let proxyUrl = `https://pixiv.cat{pixivId}.${fileExt}`;
+            let proxyUrl = `https://pixiv.cat/${pixivId}.${fileExt}`;
 
             if (pixivId && (sourceUrl.includes('pixiv.net') || sourceUrl.includes('pximg.net'))) {
                 const pageMatch = sourceUrl.match(/_p(\d+)/) || sourceUrl.match(/page=(\d+)/);
                 if (pageMatch) {
                     const pageIndex = parseInt(pageMatch[1]) + 1; // Берем именно цифру из группы [1]
                     if (pageIndex > 1) {
-                        proxyUrl = `https://pixiv.cat{pixivId}-${pageIndex}.${fileExt}`;
+                        proxyUrl = `https://pixiv.cat/${pixivId}-${pageIndex}.${fileExt}`;
                     }
                 }
             }
@@ -10747,6 +10753,106 @@ async function fixHiddenGoldPages() {
 fixHiddenGoldPages();
 
 bbbInit();
+
+function loadBypassCSPImage(proxyUrl, imgElement, originalSource = '') {
+    const gmXhr = (typeof GM_xmlhttpRequest === 'function') ? GM_xmlhttpRequest :
+                  (typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function') ? GM.xmlHttpRequest : null;
+
+    if (!gmXhr) return;
+
+    // Отрезаем ?original и прочие query-параметры для точной проверки расширения
+    const cleanSource = (originalSource || '').split('?')[0];
+    const cleanProxy = (proxyUrl || '').split('?')[0];
+
+    const isUgoiraOrVideo = /\.(zip|webm|mp4)$/i.test(cleanSource) ||
+                            /\.(zip|webm|mp4)$/i.test(cleanProxy) ||
+                            cleanSource.includes('img-zip-ugoira');
+
+    // Формируем очередь ссылок (если первая даст 404 — скрипт сам попробует следующую)
+    const urlsToTry = [];
+
+    if (isUgoiraOrVideo) {
+        // 1. Прямая трансформация ссылки Ugoira на сервере Pixiv в обложку первого кадра:
+        // .../img-zip-ugoira/img/.../ID-HASH_ugoira1920x1080.zip -> .../img-master/img/.../ID-HASH_master1200.jpg
+        if (cleanSource.includes('img-zip-ugoira')) {
+            urlsToTry.push(
+                cleanSource
+                    .replace('/img-zip-ugoira/', '/img-master/')
+                    .replace(/_ugoira\d+x\d+\.zip$/i, '_master1200.jpg')
+            );
+            // На случай старого формата именования обложек с _p0:
+            urlsToTry.push(
+                cleanSource
+                    .replace('/img-zip-ugoira/', '/img-master/')
+                    .replace(/_ugoira\d+x\d+\.zip$/i, '_p0_master1200.jpg')
+            );
+        }
+        // 2. Запасной вариант через зеркало i.pixiv.re
+        const baseRe = cleanProxy.replace('pixiv.cat', 'i.pixiv.re').replace(/\.(zip|webm|mp4)$/i, '');
+        urlsToTry.push(`${baseRe}.jpg`, `${baseRe}.png`);
+    } else if (cleanSource.includes('i.pximg.net')) {
+        // Обычная картинка или GIF напрямую с Pixiv (тоже без лишнего ?original, либо исходная)
+        urlsToTry.push(cleanSource);
+        urlsToTry.push( cleanProxy.replace('pixiv.cat', 'i.pixiv.re') );
+    } else {
+        urlsToTry.push( cleanProxy.replace('pixiv.cat', 'i.pixiv.re') );
+    }
+
+    // Рекурсивная попытка загрузки по очереди до первой рабочей ссылки
+    function tryFetch(index) {
+        if (index >= urlsToTry.length) return;
+        const targetUrl = urlsToTry[index];
+
+        gmXhr({
+            method: 'GET',
+            url: targetUrl,
+            headers: {
+                'Referer': 'https://pixiv.net',
+                'Accept': 'image/avif,image/webp,image/apng,image/gif,image/*,video/*,*/*;q=0.8'
+            },
+            responseType: 'blob',
+            onload: function(response) {
+                if (response.status >= 200 && response.status < 300 && response.response) {
+                    const blob = response.response;
+                    const mime = blob.type || '';
+
+                    // Если пришел HTML или архив вместо картинки — пробуем следующий URL из списка
+                    if (blob.size < 1000 || mime.includes('html') || mime.includes('zip')) {
+                        tryFetch(index + 1);
+                        return;
+                    }
+
+                    const reader = new FileReader();
+                    reader.onloadend = function() {
+                        if (!reader.result) return;
+                        if (mime.startsWith('video/')) {
+                            const video = document.createElement('video');
+                            video.src = reader.result;
+                            video.className = imgElement.className;
+                            video.autoplay = true;
+                            video.loop = true;
+                            video.muted = true;
+                            video.playsInline = true;
+                            video.style.cssText = imgElement.style.cssText;
+                            imgElement.replaceWith(video);
+                        } else {
+                            imgElement.src = reader.result;
+                        }
+                    };
+                    reader.readAsDataURL(blob);
+                } else {
+                    // Ошибка 404/403 — молча переключаемся на запасной вариант
+                    tryFetch(index + 1);
+                }
+            },
+            onerror: function() {
+                tryFetch(index + 1);
+            }
+        });
+    }
+
+    tryFetch(0);
+}
 
 // Основная функция для обработки постов
 async function processAndFixPosts() {
@@ -10804,11 +10910,10 @@ if (pixivId && pixivId !== "") {
     }
 
     const pictureElement = post.querySelector('picture');
-    const thumbLink = post.querySelector('.bbb-thumb-link');
+    const thumbLink = post.querySelector('.bbb-thumb-link') || post.querySelector('a');
 
     if (pictureElement && thumbLink) {
         const newImg = document.createElement('img');
-        newImg.src = proxyUrl;
         newImg.className = 'post-preview-image';
 
         newImg.style.maxWidth = '100%';
@@ -10816,15 +10921,23 @@ if (pixivId && pixivId !== "") {
         newImg.style.objectFit = 'contain';
 
         const oldImg = pictureElement.querySelector('img');
+        const fallbackSrc = pictureElement.querySelector('source')?.getAttribute('srcset') || (oldImg ? oldImg.src : '');
+        if (fallbackSrc) {
+            newImg.src = fallbackSrc; // Держим плашку Hidden, пока качается реальный файл
+        }
+
         if (oldImg) {
             newImg.alt = oldImg.alt || '';
             newImg.title = oldImg.title || '';
+            if (oldImg.hasAttribute('data-title')) {
+                newImg.setAttribute('data-title', oldImg.getAttribute('data-title'));
+            }
+            newImg.setAttribute('aria-expanded', 'false');
         }
 
         pictureElement.remove();
         thumbLink.appendChild(newImg);
-
-
+        loadBypassCSPImage(proxyUrl, newImg, sourceUrl);
     }
 }
 }
