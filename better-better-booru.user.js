@@ -11,10 +11,14 @@
 // @run-at         document-end
 // @grant          GM_xmlhttpRequest
 // @grant          GM_addStyle
-// @grant          GM_setValue
 // @grant          GM_getValue
+// @grant          GM_setValue
 // @grant          GM_deleteValue
 // @grant          GM_listValues
+// @grant          GM.getValue
+// @grant          GM.setValue
+// @grant          GM.deleteValue
+// @grant          GM.listValues
 // @grant          unsafeWindow
 // @icon           data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAAAAABWESUoAAAA9klEQVQ4y2NgGBgQu/Dau1/Pt/rhVPAfCkpwKXhUZ8Al2vT//yu89vDjV8AkP/P//zY0K//+eHVmoi5YyB7I/VDGiKYADP60wRT8P6aKTcH//0lgQcHS//+PYFdwFu7Ib8gKGBgYOQ22glhfGO7mqbEpzv///xyqAiAQAbGewIz8aoehQArEWsyQsu7O549XJiowoCpg4rM9CGS8V8UZ9GBwy5wBr4K/teL4Ffz//8mHgIL/v82wKgA6kkXE+zKIuRaHAhDQATFf4lHABmL+xKPAFhKUOBQwSyU+AzFXEvDFf3sCCnrxh8O3Ujwh+fXZvjoZ+udTAERqR5IgKEBRAAAAAElFTkSuQmCC
 // ==/UserScript==
@@ -10512,75 +10516,101 @@ function runBBBScript() {
 		bbbScript();
 }
 
-function bbbInit() {
-	var bbbGMFunc; // If/else variable;
+async function bbbInit() {
+    var bbbGMFunc = false;
+    var gmCache = {};
 
-	// Set up the data storage.
-	if (typeof(GM_getValue) === "undefined" || typeof(GM_getValue("bbbdoesntexist", "default")) === "undefined")
-		bbbGMFunc = false;
-	else {
-		bbbGMFunc = true;
+    // Проверяем наличие старого (GM_) или нового (GM.) API для Greasemonkey 4+
+    var hasSyncGM = (typeof GM_getValue !== "undefined" && typeof GM_getValue("bbbdoesntexist", "default") !== "undefined");
+    var hasAsyncGM = (typeof GM !== "undefined" && typeof GM.getValue === "function");
 
-		if (typeof(GM_deleteValue) === "undefined") {
-			GM_deleteValue = function(key) {
-				GM_setValue(key, "");
-			};
-		}
+    if (hasSyncGM || hasAsyncGM) {
+        bbbGMFunc = true;
 
-		if (typeof(GM_listValues) === "undefined") {
-			GM_listValues = function() {
-				return ["bbb_settings"];
-			};
-		}
+        // 1. Предзагружаем настройки в память ДО запуска основного скрипта
+        if (hasSyncGM) {
+            var val = GM_getValue("bbb_settings");
+            if (typeof val === "string") gmCache["bbb_settings"] = val;
+        } else if (hasAsyncGM) {
+            var valAsync = await GM.getValue("bbb_settings");
+            if (typeof valAsync === "string") gmCache["bbb_settings"] = valAsync;
+        }
 
-		window.addEventListener("bbbRequestLoad", function(event) {
-			var key = event.detail.key;
-			var bbbObj = event.detail.bbb;
+        // Безопасная запись свойства для обхода защиты Firefox Xray Vision
+        function setPageProp(obj, prop, val) {
+            try {
+                if (typeof cloneInto === "function") {
+                    obj[prop] = cloneInto(val, window);
+                } else {
+                    obj[prop] = val;
+                }
+            } catch (e) {
+                if (obj.wrappedJSObject) obj.wrappedJSObject[prop] = val;
+            }
+        }
 
-			if (typeof(key) === "string" && key === "bbb_settings" && typeof(bbbObj) === "object") {
-				var value = GM_getValue(key);
+        // Чтение: мгновенно отдаем из кэша синхронно
+        window.addEventListener("bbbRequestLoad", function(event) {
+            var detail = event.detail || (event.wrappedJSObject && event.wrappedJSObject.detail);
+            if (!detail) return;
+            var key = detail.key;
+            var bbbObj = detail.bbb;
+            if (key === "bbb_settings" && bbbObj && typeof gmCache[key] === "string") {
+                setPageProp(bbbObj, "gm_data", gmCache[key]);
+            }
+        }, false);
 
-				if (typeof(value) === "string")
-					bbbObj.gm_data = value;
-			}
-		}, false);
+        // Сохранение: обновляем кэш и сохраняем в хранилище менеджера
+        window.addEventListener("bbbRequestSave", function(event) {
+            var detail = event.detail || (event.wrappedJSObject && event.wrappedJSObject.detail);
+            if (!detail) return;
+            var key = detail.key;
+            var value = detail.value;
+            if (key === "bbb_settings" && typeof value === "string" && value.length <= 2500000) {
+                gmCache[key] = value;
+                if (hasSyncGM) GM_setValue(key, value);
+                else if (hasAsyncGM) GM.setValue(key, value);
+            }
+        }, false);
 
-		window.addEventListener("bbbRequestSave", function(event) {
-			var key = event.detail.key;
-			var value = event.detail.value;
+        // Удаление настроек
+        window.addEventListener("bbbRequestDelete", function(event) {
+            var detail = event.detail || (event.wrappedJSObject && event.wrappedJSObject.detail);
+            if (!detail || typeof detail.key !== "string") return;
+            delete gmCache[detail.key];
+            if (hasSyncGM) {
+                if (typeof GM_deleteValue === "function") GM_deleteValue(detail.key);
+                else GM_setValue(detail.key, "");
+            } else if (hasAsyncGM) {
+                if (typeof GM.deleteValue === "function") GM.deleteValue(detail.key);
+                else GM.setValue(detail.key, "");
+            }
+        }, false);
 
-			if (typeof(key) === "string" && key === "bbb_settings" && typeof(value) === "string" && value.length <= 2500000)
-				GM_setValue(key, value);
-		}, false);
+        // Список ключей
+        window.addEventListener("bbbRequestList", function(event) {
+            var detail = event.detail || (event.wrappedJSObject && event.wrappedJSObject.detail);
+            if (!detail || !detail.bbb) return;
+            var keysStr = Object.keys(gmCache).join(",");
+            setPageProp(detail.bbb, "gm_data", keysStr);
+        }, false);
+    }
 
-		window.addEventListener("bbbRequestDelete", function(event) {
-			var key = event.detail.key;
+    // Инжектируем скрипт с передачей актуального CSP nonce
+    var nonce = document.querySelector('meta[name="csp-nonce"]')?.content || 
+                document.querySelector('script[nonce]')?.nonce ||
+                document.querySelector('script[nonce]')?.getAttribute('nonce');
 
-			if (typeof(key) === "string")
-				GM_deleteValue(key);
-		}, false);
-
-		window.addEventListener("bbbRequestList", function(event) {
-			var bbbObj = event.detail.bbb;
-
-			if (typeof(bbbObj) === "object")
-				bbbObj.gm_data = GM_listValues().join(","); // Can't pass an array/object back to the page scope, so change it into a string for now.
-		}, false);
-	}
-
-	// Inject the script.
-	var nonce = document.querySelector('meta[name="csp-nonce"]')?.content || 
-            document.querySelector('script[nonce]')?.nonce;
-
-	var script = document.createElement("script");
-	script.type = "text/javascript";
-	if (nonce) {
-	    script.setAttribute("nonce", nonce);
-				}
-	script.textContent = "(" + bbbScript.toString() + ")();";
-	(document.head || document.documentElement).appendChild(script);
-
+    var script = document.createElement('script');
+    script.type = "text/javascript";
+    if (nonce) {
+        script.setAttribute("nonce", nonce);
+    }
+    script.appendChild(document.createTextNode('window.bbbGMFunc = ' + bbbGMFunc + '; ' + bbbScript + '(' + runBBBScript + ')();'));
+    (document.body || document.head || document.documentElement).appendChild(script);
+    window.setTimeout(function() { if (script.parentNode) script.parentNode.removeChild(script); }, 0);
 }
+
 
 async function fixHiddenGoldPages() {
         // ЖЕСТКАЯ ЗАЩИТА: Запускаемся ТОЛЬКО в общем поиске/каталоге!
@@ -10613,15 +10643,20 @@ async function fixHiddenGoldPages() {
     if (limit === 20) { // Если в URL дефолт, пытаемся вытащить настройку BBB
         try {
             // 1. Проверяем стандартное хранилище Tampermonkey (если скрипт использует GM_getValue)
-            if (typeof GM_getValue !== 'undefined') {
-                // Старый BBB мог сохранять настройки в JSON-строку или отдельным ключом
-                const bbbConfig = GM_getValue('bbb_settings') || GM_getValue('settings');
-                if (bbbConfig) {
-                    const parsed = typeof bbbConfig === 'string' ? JSON.parse(bbbConfig) : bbbConfig;
-                    limit = parseInt(parsed.thumbnail_count) || parseInt(parsed.thumbnail_count_default) || limit;
-                }
+			if (typeof GM_getValue !== 'undefined') {
+    			const bbbConfig = GM_getValue('bbb_settings') || GM_getValue('settings');
+    				if (bbbConfig) {
+        				const parsed = typeof bbbConfig === 'string' ? JSON.parse(bbbConfig) : bbbConfig;
+        				limit = parseInt(parsed.thumbnail_count) || parseInt(parsed.thumbnail_count_default) || limit;
+    								}
+			} else if (typeof GM !== 'undefined' && typeof GM.getValue === 'function') {
+    			const bbbConfig = await GM.getValue('bbb_settings') || await GM.getValue('settings');
+   				 if (bbbConfig) {
+        			const parsed = typeof bbbConfig === 'string' ? JSON.parse(bbbConfig) : bbbConfig;
+        			limit = parseInt(parsed.thumbnail_count) || parseInt(parsed.thumbnail_count_default) || limit;
+   	 							}
+							}	
             }
-
             // 2. Если не нашли, проверяем стандартный LocalStorage браузера
             if (limit === 20 && window.localStorage) {
                 const localConfig = window.localStorage.getItem('bbb_settings') || window.localStorage.getItem('bbb_config');
